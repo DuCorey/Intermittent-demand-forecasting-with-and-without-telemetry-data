@@ -184,27 +184,42 @@ head.TelemtryData <- function(x, ...) {
 
 ## Tank level data
 tank_data_for_sitename <- function(telem_sub, telemetry_sitename, tank_info_client) {
+    modified_tank_info_name <- FALSE
 
     tank_info_tanks <- unique(tank_info_client[, "TelemetryLevelVariable"])
+    ## Fix telemetry variable names
+    if ("LIN_LEVEL_INCH" %in% tank_info_tanks) {
+        tank_info_tanks[tank_info_tanks=="LIN_LEVEL_INCH"] = "LIN_Level_Inch"
+        modified_tank_info_name <- TRUE
+        og_tank <- "LIN_LEVEL_INCH"
+    }
+
     telem_tanks <- sapply(unique(telem_sub[, "VARNAME"]), as.character)
 
     if (setequal(tank_info_tanks, telem_tanks)) {
 
         f <- function(tank) {
             telemetry_tank <- telem_sub[VARNAME == tank]
-            tank_info_sub_tank <- subset(tank_info_client,
-                                         TelemetryLevelVariable == tank)
+
+            if (modified_tank_info_name) {
+                tank_info_sub_tank <- subset(tank_info_client,
+                                             TelemetryLevelVariable == og_tank)
+            } else {
+                tank_info_sub_tank <- subset(tank_info_client,
+                                             TelemetryLevelVariable == tank)
+            }
+
             res <- Tank(tank, tank_info_sub_tank,telemetry_tank)
             return(res)
         }
-        
+
         res <- lapply(telem_tanks, f)
         names(res) <- NULL
         return(res)
     } else {
-        warning(cat("Mismatched telementry variable names for site ", telemetry_sitename))
+        warning(cat("Mismatched telemetry variable names for site ", telemetry_sitename))
         return(NULL)
-    }          
+    }
 }
 
 Tank <- function(tank, tank_info_sub_tank, telemetry_subset) {
@@ -244,8 +259,8 @@ Tank <- function(tank, tank_info_sub_tank, telemetry_subset) {
             unit = as.character(unit),
             rtu = as.character(rtu),
             
-            telemetry.serie = telemetry_serie,
-            consumption.serie = consumption_serie
+            telemetry.serie = as.data.frame(telemetry_serie),
+            consumption.serie = as.data.frame(consumption_serie)
         ),
         class = "Tank"
     )
@@ -398,6 +413,47 @@ depot_numbers_from_sitename_tank_info_subset <- function(df) {
 split_erp_codes <- function(x) {
     split <- strsplit(x, "_")
     return(split[[1]][1])
+}
+
+#' TODO: Double check these next two functions work in the case of 1 delivery
+#' for 2 tanks
+deliveries_for_tank <- function(tank, client) {
+    tank_id <- tank$id
+    dp_nums <- client$dp_nums
+    dp_dels <- names(dp_nums[dp_nums==tank_id])
+
+    f <- function(delivery) {
+        if (delivery$DPNumber %in% dp_dels) {
+            return(delivery)
+        } else {
+            return(NULL)
+        }
+    }
+    
+    res <- lapply(client$delivery, f) %>%
+        plyr::compact()
+    
+    return(res)
+}
+
+
+tanks_for_delivery <- function(delivery, client) {
+    del_dp <- delivery$DPNumber
+    dp_nums <- client$dp_nums
+    tanks <- dp_nums[names(dp_nums)==del_dp]
+
+    f <- function(tank) {
+        if (tank$id %in% tanks) {
+            return(tank)
+        } else {
+            return(NULL)
+        }
+    }
+
+    res <- lapply(client$tank, f) %>%
+        plyr::compact()
+
+    return(res)
 }
 
 
