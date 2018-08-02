@@ -15,6 +15,7 @@ library(tidyr)
 library(magrittr)
 library(readxl)
 library(data.table)
+library(lubridate)
 
 
 #' functions
@@ -51,9 +52,9 @@ DeliveryData <- function() {
     merged_data$ShiftRealStartDateTime[merged_data$ShiftRealStartDateTime == ""] <- NA
     merged_data$ConfirmationDate[merged_data$ConfirmationDate == ""]             <- NA
 
-    merged_data$RealStartDateTime      %<>% as.POSIXct
-    merged_data$ShiftRealStartDateTime %<>% as.POSIXct
-    merged_data$ConfirmationDate       %<>% as.POSIXct
+    merged_data$RealStartDateTime      %<>% as.POSIXct(., tz = "America/New_York")
+    merged_data$ShiftRealStartDateTime %<>% as.POSIXct(., tz = "America/New_York")
+    merged_data$ConfirmationDate       %<>% as.POSIXct(., tz = "America/New_York")
 
     # Determine unique client depot numbers
     dp = unique(merged_data[, "DPNumber"])
@@ -152,12 +153,17 @@ Delivery <- function(df, dp_num, tanks) {
 TelemetryData <- function() {
     files <- c("../data/internship data/VW_LEVEL_AND_PRESSURE_IM.csv")
 
-    data <- read.csv(files, header = TRUE)
+    data <- read.csv(files, header = TRUE, stringsAsFactors=FALSE)
 
-    # Convert time
-    data$DATETIME %<>% as.POSIXct
-
-    # Determine unique client sites
+    ## Convert time to eastern time
+    ## Our time is a raw string with a timezone attached to it.
+    ## To convert to eastern time, we first take our time and subtract 
+    ## its timezone, thus creating a UTC (GMT) time. We then convert from UTC to
+    ## America/New_York the standard eastern time zone.
+    data$DATETIME %<>% as.POSIXct(., tz="GMT") %>%
+        subtract(., lubridate::hm(paste(data$TIMEZONE, ":00", sep=""))) %>%
+        lubridate::with_tz(., tzone = "America/New_York")
+    
     sites <- unique(data[, "SITENAME"])
     
     structure(
