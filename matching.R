@@ -1,0 +1,143 @@
+library(magrittr)
+library(lubridate)
+library(dplyr)
+library(pryr)
+"%o%" <- pryr::compose
+
+deliveries_from_telemetry <- function(telemetry, threshold = 10) {
+    #' loop that looks over all the telemetry and find sequences of positive amounts
+    #' Initialize the looping variables
+    telemetry %<>% as.data.frame  # Indexing is faster as a data.frame
+    j <- 1
+    date <- vector(mode = "raw", length = 0)
+    amount <- vector(mode = "numeric", length = 0)
+    telemetry$first_difference <- c(0, diff(telemetry$level))
+
+    while (j <= nrow(telemetry)) {
+        a <- 0
+
+        ## If we are over the threshold we consider it the beginning of a refil
+        if (telemetry[j, "first_difference"] > threshold) {
+            while (telemetry[j + a, "first_difference"] >= 0) {
+                if ((j+a) == nrow(telemetry)) {
+                    a <- a + 1
+                    break
+                }
+                a <- a + 1  # continuous refill  counter
+            }
+
+            ## Appending to vectors is the fastest way in R to store results
+            ## from explicit loops.
+            date <- c(date, telemetry[j, 1])
+            amount <- c(amount, sum(telemetry[j:(j + a - 1), "first_difference"]))
+
+            j <- j + a  # Continue the loop but after our continuous refill  counter
+        } else {
+            j <- j + 1
+        }
+    }
+    ## The date has to be converted back into POSIXct from numeric as the raw
+    ## vector containing the dates is the numeric values. Still need to supply
+    ## the unix origin for POSIXct.
+    return(data.frame(Date=as.POSIXct.numeric(date, origin = '1970-01-01 00:00:00'),
+                      Amount=amount))
+}
+
+
+is_Date <- function(x) {
+    return(inherits(x, 'Date'))
+}
+
+is_POSIXct <- function(x) {
+    return(inherits(x, 'POSIXct'))
+}
+
+
+## TODO have an adaptible time_window, since if it is too large there could be overlap
+## IE the time_window shouldn't be large than the two closest times in either time series
+
+match_time_series <- function(a, b, time_window=8) {
+    #' Match two time series time index together
+    #' Input - (a,b): two dataframes containing the time series
+    #'         time_window: the window of time to search around for a match
+    #' Output - A dataframe containing both initial time series with matches beeing
+    #'          next to each other.
+
+
+    ## Check if the input data is properly formatted data.frame should have two
+    ## columns. First column should be convertible to dates or POSIXct.
+    if (!all(sapply(a[[1]], is_Date)) & !all(sapply(a[[1]], is_POSIXct))) {
+        stop("Incorrect date format in the first column of dataframe a. Expected date or POSIXct")
+    } else if (!all(sapply(b[[1]], is_Date)) & !all(sapply(b[[1]], is_POSIXct))) {
+        stop("Incorrect date format in the first column of dataframe b. Expected date or POSIXct")
+    }
+
+
+    a %<>% dplyr::arrange(.[[1]])
+    b %<>% dplyr::arrange(.[[1]])
+
+    ## time_list$year <- lubridate::year(time_list$RealStartDateTime)
+    ## time_list$week <- lubridate::week(time_list$RealStartDateTime)
+
+    matches <- vector(mode = "logical", length = nrow(b))
+
+    get_a_match <- function(x, time_list, time_window) {
+        #' Determines if x (a time stamp) can be matched to any of dates in time_list
+        #' If a match is found return the closest match.
+        #' Also update our list of found values.
+
+        updated_time_list <- time_list[matches==FALSE]
+        f <- pryr::partial(difftime, time2 = x, units = "hours")
+
+        res <- sapply(updated_time_list, abs %o% as.double %o% f)
+
+        small_ind <- which.min(res)
+
+        if (res[small_ind] < time_window) {
+            matches[matches==FALSE][small_ind] <<- TRUE
+            date <- updated_time_list[small_ind]
+            b_value <- b[[2]][which(b[[1]]==date)]
+            return(list(date, b_value))
+        } else {
+            return(list(as.POSIXct(NA), NA))
+        }
+    }
+
+
+    f <- pryr::partial(get_a_match, time_list = b[[1]], time_window = time_window)
+    res <- lapply(a[[1]], f)
+
+    matching_dates <- do.call(c, lapply(res, . %>% .[[1]]))
+    matching_values <- do.call(c, lapply(res, . %>% .[[2]]))
+
+    #' Merging both dataframes and lining up the matches
+    #' Start by merging the data with the matches.
+    #' Then add the missing dates from b
+    res_df <- data.frame(a[[1]], matching_dates, a[[2]], matching_values) %>%
+        merge(.,
+              b[matches==FALSE,],
+              by.x = c("matching_dates", "matching_values"),
+              by.y = names(b),
+              all = TRUE)
+
+    colnames(res_df) <- c(names(b), names(a))
+
+    ## Order the df with both dates column merged together
+    merged_time <- res_df[,1]
+    merged_time[is.na(merged_time)] <- res_df[,3][is.na(res_df[,1])]
+    res_df <- res_df[order(merged_time),]
+
+    class(res_df) <- c("MatchedTimeSeries", class(res_df))
+
+    return(res_df)
+}
+
+
+cor_matched_time_series <- function(df) {
+    return(cor(df[[2]], df[[4]], use = "pairwise.complete.obs", method = "pearson"))
+}
+
+
+matching_ratio <- function(df) {
+    return(sum(is.na(df[[1]]))/nrow(df))
+}
