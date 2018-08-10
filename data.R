@@ -1,5 +1,5 @@
 #' title: data.R
-#' comments: this file creates the data objects necessary for 
+#' comments: this file creates the data objects necessary for
 #' author: Corey Ducharme / corey.ducharme@polymtl.ca
 #' input: the excel files which contain the deliveries stored in the report folder
 #' output: a csv which contains the deliveries for all clients for all years
@@ -62,7 +62,7 @@ DeliveryData <- function() {
     #' Clean data
     #' TODO
 
-    
+
     structure(
         list(
             sources = sources,
@@ -73,6 +73,7 @@ DeliveryData <- function() {
         class="DeliveryData"
     )
 }
+
 
 print.DeliveryData <- function(x, ...) {
     invisible(x)
@@ -86,17 +87,19 @@ head.DeliveryData <- function(x, ...) {
     head(x$data)
 }
 
+
 deliveries_for_dp_nums <- function(delivery_data, dp_nums) {
-   
+
     f <- function(key, value) {
          delivery_subset <- delivery_data[DPNumber == key]
          return(Delivery(delivery_subset, key, value))
     }
-    
+
     res <- mapply(f, key=names(dp_nums), value=dp_nums, SIMPLIFY = FALSE)
     names(res) <- NULL
     return(res)
 }
+
 
 Delivery <- function(df, dp_num, tanks) {
     data <- subset(df, select = c("DispatchZoneCode",
@@ -138,7 +141,7 @@ Delivery <- function(df, dp_num, tanks) {
                    )
     rownames(data) <- NULL
 
-    
+
     structure(
         list(
             DPNumber = dp_num,
@@ -157,15 +160,15 @@ TelemetryData <- function() {
 
     ## Convert time to eastern time
     ## Our time is a raw string with a timezone attached to it.
-    ## To convert to eastern time, we first take our time and subtract 
+    ## To convert to eastern time, we first take our time and subtract
     ## its timezone, thus creating a UTC (GMT) time. We then convert from UTC to
     ## America/New_York the standard eastern time zone.
     data$DATETIME %<>% as.POSIXct(., tz="GMT") %>%
         subtract(., lubridate::hm(paste(data$TIMEZONE, ":00", sep=""))) %>%
         lubridate::with_tz(., tzone = "America/New_York")
-    
+
     sites <- unique(data[, "SITENAME"])
-    
+
     structure(
         list(
             files = files,
@@ -187,6 +190,7 @@ summary.TelemetryData <- function(x, ...) {
 head.TelemtryData <- function(x, ...) {
     head(x$data)
 }
+
 
 ## Tank level data
 tank_data_for_sitename <- function(telem_sub, telemetry_sitename, tank_info_client) {
@@ -228,8 +232,9 @@ tank_data_for_sitename <- function(telem_sub, telemetry_sitename, tank_info_clie
     }
 }
 
+
 Tank <- function(tank, tank_info_sub_tank, telemetry_subset) {
-    ## Tank information    
+    ## Tank information
     product <- tank_info_sub_tank[, "Product"]
     max_level <- tank_info_sub_tank[, "MaxLevel"]
     max_level_unit <- tank_info_sub_tank[, "Abbreviation__1"]
@@ -241,19 +246,20 @@ Tank <- function(tank, tank_info_sub_tank, telemetry_subset) {
     unit <- telemetry_subset[1, "CUSTOMERUNIT"]
     rtu <- telemetry_subset[1, "RTUTYPE"]
 
-    
+
     ## The time series
     consumption_serie <- convert_to_daily_consumption(telemetry_subset)
-    telemetry_serie <- telemetry_subset[, c("DATETIME", "CUSTOMERVALUE")]
+    telemetry_serie <- telemetry_subset[, c("DATETIME", "CUSTOMERVALUE")] %>%
+        arrange(., DATETIME)
     colnames(telemetry_serie) <- c("datetime", "level")
     rownames(telemetry_serie) <- NULL
 
-    
+
     structure(
         list(
             id = as.character(tank),
             unit = as.character(unit),
-            product = as.character(product),                
+            product = as.character(product),
             max.level = as.numeric(max_level),
             max.level.unit = as.character(max_level_unit),
             orientation = as.character(orientation),
@@ -264,7 +270,7 @@ Tank <- function(tank, tank_info_sub_tank, telemetry_subset) {
 ##            varname = as.character(varname),
             unit = as.character(unit),
             rtu = as.character(rtu),
-            
+
             telemetry.serie = as.data.frame(telemetry_serie),
             consumption.serie = as.data.frame(consumption_serie)
         ),
@@ -272,10 +278,11 @@ Tank <- function(tank, tank_info_sub_tank, telemetry_subset) {
     )
 }
 
+
 convert_to_daily_consumption <- function(df) {
     ## Currently the first day may not be complete.
     ## Impact should be minor though.
-    
+
     df$first_difference <- c(0, diff(df$CUSTOMERVALUE))
 
     ## We ignore the timezones in the date creation
@@ -284,7 +291,8 @@ convert_to_daily_consumption <- function(df) {
                              FUN = function(x) -sum(x[which(x<0)]))
     colnames(consumption) <- c("date", "value")
     return(consumption)
-}        
+}
+
 
 ## Client view data objects and functions
 ClientData <- function(telemetry_data, delivery_data, telemetry_sitename,
@@ -314,7 +322,7 @@ ClientData <- function(telemetry_data, delivery_data, telemetry_sitename,
     } else {
         address <- tank_info_client[1, "Address Line1"]
     }
-    
+
 
     structure(
         list(
@@ -334,7 +342,8 @@ ClientData <- function(telemetry_data, delivery_data, telemetry_sitename,
         class = "Client"
     )
 }
-    
+
+
 client_view_data <- function(sample_number = NULL, ...) {
     print("Loading Telemetry Data")
     ##telemetry_data <- TelemetryData()
@@ -372,26 +381,27 @@ client_view_data <- function(sample_number = NULL, ...) {
     }
 
     print("Merging delivery and consumption")
-    
+
     client_data <- lapply_pb(data_telemetry_sites, f) %>%
         plyr::compact()  #Remove NULL entries in the client_data list
 
     return(client_data)
 }
 
+
 client_data_for_telemetry_sitename <- function(telemetry_data, delivery_data,
                                                telemetry_sitename, tank_info,
                                                tank_info_telemetry_sites) {
     ## First check if our telemetry sitanem is in our tank info merge table
     if (telemetry_sitename %in% tank_info_telemetry_sites) {
-        
+
         tank_info_subset <- subset(tank_info,
                                    TelemetrySitename == telemetry_sitename)
         dp_nums <- depot_numbers_from_sitename_tank_info_subset(tank_info_subset)
 
         ## Check if the depot numbers are in our delivery data
         dp_nums <- dp_nums[names(dp_nums) %in% delivery_data$DPNumbers]
-        
+
         if (length(dp_nums) > 0) {
             ## Both conditions are met, we then return the data object for a client
             return(ClientData(telemetry_data, delivery_data, telemetry_sitename,
@@ -404,6 +414,7 @@ client_data_for_telemetry_sitename <- function(telemetry_data, delivery_data,
     }
 }
 
+
 depot_numbers_from_sitename_tank_info_subset <- function(df) {
     dp_nums = list()
 
@@ -411,15 +422,17 @@ depot_numbers_from_sitename_tank_info_subset <- function(df) {
         erp_code <- as.character(split_erp_codes(df[i, "Storage ERPCode"]))
         tank <- df[i, "TelemetryLevelVariable"]
         ## append to the list the tank
-        dp_nums[[erp_code]] <- c(dp_nums[[erp_code]], tank)  
+        dp_nums[[erp_code]] <- c(dp_nums[[erp_code]], tank)
     }
     return(dp_nums)
 }
+
 
 split_erp_codes <- function(x) {
     split <- strsplit(x, "_")
     return(split[[1]][1])
 }
+
 
 #' TODO: Double check these next two functions work in the case of 1 delivery
 #' for 2 tanks
@@ -435,10 +448,10 @@ deliveries_for_tank <- function(tank, client) {
             return(NULL)
         }
     }
-    
+
     res <- lapply(client$delivery, f) %>%
         plyr::compact()
-    
+
     return(res)
 }
 
