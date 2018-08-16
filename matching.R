@@ -4,6 +4,7 @@ library(dplyr)
 library(pryr)
 "%o%" <- pryr::compose
 
+
 deliveries_from_telemetry <- function(telemetry, threshold = 10) {
     #' loop that looks over all the telemetry and find sequences of positive amounts
     #' Initialize the looping variables
@@ -87,6 +88,12 @@ match_time_series <- function(a, b, time_window=8) {
         #' Also update our list of found values.
 
         updated_time_list <- time_list[matches==FALSE]
+
+        ## Don't continue the function if we have completed every possible match
+        if (length(updated_time_list) == 0) {
+            return(list(as.POSIXct(NA), NA, NA))
+        }
+
         f <- pryr::partial(difftime, time2 = x, units = "hours")
 
         res <- sapply(updated_time_list, abs %o% as.double %o% f)
@@ -97,9 +104,9 @@ match_time_series <- function(a, b, time_window=8) {
             matches[matches==FALSE][small_ind] <<- TRUE
             date <- updated_time_list[small_ind]
             b_value <- b[[2]][which(b[[1]]==date)]
-            return(list(date, b_value))
+            return(list(date, b_value, res[small_ind]))
         } else {
-            return(list(as.POSIXct(NA), NA))
+            return(list(as.POSIXct(NA), NA, NA))
         }
     }
 
@@ -109,25 +116,27 @@ match_time_series <- function(a, b, time_window=8) {
 
     matching_dates <- do.call(c, lapply(res, . %>% .[[1]]))
     matching_values <- do.call(c, lapply(res, . %>% .[[2]]))
+    time_diffs <- do.call(c, lapply(res, . %>% .[[3]]))
 
     #' Merging both dataframes and lining up the matches
     #' Start by merging the data with the matches.
     #' Then add the missing dates from b
-    res_df <- data.frame(a[[1]], matching_dates, a[[2]], matching_values) %>%
+    res_df <- data.frame(a[[1]], matching_dates, a[[2]], matching_values, time_diffs) %>%
         merge(.,
               b[matches==FALSE,],
               by.x = c("matching_dates", "matching_values"),
               by.y = names(b),
               all = TRUE)
 
-    colnames(res_df) <- c(names(b), names(a))
+    colnames(res_df) <- c(names(b), names(a), "time_diff")
 
     ## Order the df with both dates column merged together
     merged_time <- res_df[,1]
     merged_time[is.na(merged_time)] <- res_df[,3][is.na(res_df[,1])]
     res_df <- res_df[order(merged_time),]
+    rownames(res_df) <- NULL
 
-    class(res_df) <- c("MatchedTimeSeries", class(res_df))
+    ##class(res_df) <- c("MatchedTimeSeries", class(res_df))
 
     return(res_df)
 }
@@ -140,4 +149,59 @@ cor_matched_time_series <- function(df) {
 
 matching_ratio <- function(df) {
     return(sum(is.na(df[[1]]))/nrow(df))
+}
+
+
+best_start_matching <- function(df) {
+    #' Return the best start row index of the matches dataframe.
+    #' i.e. return the index of first row that does not have any NA values
+    #' starting from the top of dataframe
+
+    na_list <- complete.cases(df)
+    for (i in seq_along(na_list)) {
+        if (na_list[i]) {
+            return(i)
+        }
+    }
+}
+
+
+best_end_matching <- function(df) {
+    #' Return the best end row index of the matches dataframe.
+    #' i.e. return the index of the first row that does not have nay NA values
+    #' starting from the end of the df.
+
+    na_list <- complete.cases(df)
+    for (i in rev(seq_along(na_list))) {
+        if (na_list[i]) {
+            return(i)
+        }
+    }
+}
+
+
+if (FALSE) {  # Prevent it from being run when sourcing the file
+
+    ## has duplicate and zeros DQ_DAILYHOUN_TX_11168
+
+    client <- sample[[4]]
+    tank <- client$tank[[1]]
+    sample_tel <- tank$telemetry
+    tel_deliveries <- deliveries_from_telemetry(sample_tel, threshold = 20)
+    actual_del <- ts_for_delivery(deliveries_for_tank(tank, client)[[1]])
+    match_time_series(tel_deliveries, actual_del, 10)
+
+    client$delivery[[1]]$df[DeliveredQuantity == 0]
+
+    ## Check for NA ShiftRealStartDateTime
+    f <- function(client) {
+        actual_del <- ts_for_delivery(client$delivery[[1]])
+        if(any(is.na(actual_del[["ShiftRealStartDateTime"]]))) {
+            return(client$UID)
+        } else {
+            return(NULL)
+        }
+    }
+    lapply(sample, f) %>% plyr::compact()
+
 }
