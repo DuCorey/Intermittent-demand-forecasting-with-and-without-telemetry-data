@@ -35,16 +35,19 @@ fix_raw_delivery_column_names <- function(data) {
 ### data objects
 ## Delivery data
 DeliveryData <- function() {
-    sources <- c("../data/internship data/Reports/2015", "../data/internship data/Reports/2016", "../data/internship data/Reports")
+    sources <- c("../data/internship data/Reports/2015",
+                 "../data/internship data/Reports/2016",
+                 "../data/internship data/Reports")
     f <- pryr::partial(list.files, pattern = "*.csv", full.names = TRUE)
     files <- do.call(c, lapply(sources, f))
 
     merged_data <-
         do.call(rbind,
                 lapply(files, fix_raw_delivery_column_names %o% read_csv_skip_second_line)) %>%
-        tidyr::drop_na(X, DPNumber) %>%
-        dplyr::distinct(RealStartDateTime, ShiftRealStartDateTime,
-                        ConfirmationDate, DPNumber, .keep_all = TRUE)
+        tidyr::drop_na(., X, DPNumber) %>%
+
+        ## We only keep distinct deliveries based on ShiftRealStartDateTime
+        dplyr::distinct(., ShiftRealStartDateTime, DPNumber, .keep_all = TRUE)
 
     #' Convert strings to dates
     #' First convert empty strings into NA so that the conversion to POSIXct can work
@@ -56,11 +59,16 @@ DeliveryData <- function() {
     merged_data$ShiftRealStartDateTime %<>% as.POSIXct(., tz = "America/New_York")
     merged_data$ConfirmationDate       %<>% as.POSIXct(., tz = "America/New_York")
 
-    # Determine unique client depot numbers
-    dp = unique(merged_data[, "DPNumber"])
-
     #' Clean data
     #' TODO
+    #' Speed up subsetting using data.table
+    merged_data %<>% data.table::as.data.table() %>%
+        #' Remove rows with 0 delivered quantity
+        .[DeliveredQuantity > 0]
+
+
+    # Determine unique client depot numbers
+    dps = unique(merged_data[["DPNumber"]])
 
 
     structure(
@@ -68,7 +76,7 @@ DeliveryData <- function() {
             sources = sources,
             files = files,
             data = merged_data,
-            DPNumbers = dp
+            DPNumbers = dps
         ),
         class="DeliveryData"
     )
@@ -348,12 +356,12 @@ client_view_data <- function(sample_number = NULL, ...) {
     print("Loading Telemetry Data")
     ##telemetry_data <- TelemetryData()
     telemetry_data <- readRDS(file = "../data/master/telemetry.rds")
-    telemetry_data$data %<>% as.data.table
+    telemetry_data$data %<>% data.table::as.data.table()
 
     print("Loading Delivery Data")
     ##delivery_data <- DeliveryData()
     delivery_data <- readRDS(file = "../data/master/delivery.rds")
-    delivery_data$data %<>% as.data.table
+    delivery_data$data %<>% data.table::as.data.table()
 
     print("Loading merge table")
     tank_info <- readxl::read_excel("../data/internship data/US Tank info.xlsx") %>%
@@ -375,7 +383,8 @@ client_view_data <- function(sample_number = NULL, ...) {
                        tank_info_telemetry_sites = tank_info_telemetry_sites)
 
     if (!is.null(sample_number)) {
-        data_telemetry_sites <- sample(telemetry_data$sites, sample_number)
+        ## Create a consistent sample of the data
+        data_telemetry_sites <- telemetry_data$sites[1:100]
     } else {
        data_telemetry_sites <- telemetry_data$sites
     }
@@ -474,6 +483,11 @@ tanks_for_delivery <- function(delivery, client) {
 
     return(res)
 }
+
+
+ts_for_delivery <- function(delivery) {
+    return(delivery$df[,c('ShiftRealStartDateTime', 'DeliveredQuantity')])
+ }
 
 
 if (FALSE) {  # Prevents it from running when sourcing the file
