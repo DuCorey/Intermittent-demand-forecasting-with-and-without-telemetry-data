@@ -42,6 +42,14 @@ telem_sub <- subset(telemetry$data, SITENAME == sitename)
 
 tank_data <- tank_data_for_sitename(as.data.table(telem_sub), sitename, tank_info_subset)
 
+## Matching
+deliveries <- sample[[48]]$delivery
+tanks <- sample[[48]]$tank
+dp_nums <- sample[[48]]$dp_nums
+match_deliveries_tanks(deliveries, tanks, dp_nums)
+length(match_deliveries_tanks(deliveries, tanks, dp_nums))
+system.time(match_deliveries_tanks(deliveries, tanks, dp_nums))
+
 
 #' Delivery Distribution
 library("ggplot2")

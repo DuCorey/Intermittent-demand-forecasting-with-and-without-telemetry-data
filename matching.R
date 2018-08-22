@@ -57,7 +57,7 @@ is_POSIXct <- function(x) {
 ## TODO have an adaptible time_window, since if it is too large there could be overlap
 ## IE the time_window shouldn't be large than the two closest times in either time series
 
-match_time_series <- function(a, b, time_window=8) {
+match_time_series <- function(a, b, time_window=10) {
     #' Match two time series time index together
     #' Input - (a,b): two dataframes containing the time series
     #'         time_window: the window of time to search around for a match
@@ -184,14 +184,14 @@ if (FALSE) {  # Prevent it from being run when sourcing the file
 
     ## has duplicate and zeros DQ_DAILYHOUN_TX_11168
 
-    client <- sample[[4]]
+    client <- sample[[2]]
     tank <- client$tank[[1]]
     sample_tel <- tank$telemetry
     tel_deliveries <- deliveries_from_telemetry(sample_tel, threshold = 20)
-    actual_del <- ts_for_delivery(deliveries_for_tank(tank, client)[[1]])
+    system.time(deliveries_from_telemetry(sample_tel, threshold = 20))
+    actual_del <- ts_for_delivery(deliveries_for_tank(tank, client))
     match_time_series(tel_deliveries, actual_del, 10)
-
-    client$delivery[[1]]$df[DeliveredQuantity == 0]
+    system.time(match_time_series(tel_deliveries, actual_del, 10))
 
     ## Check for NA ShiftRealStartDateTime
     f <- function(client) {

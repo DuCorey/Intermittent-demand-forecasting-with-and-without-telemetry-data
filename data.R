@@ -20,6 +20,8 @@ library(lubridate)
 
 #' functions
 source("utils.R")
+source("matching.R")
+
 "%o%" <- pryr::compose
 
 read_csv_skip_second_line <- function(file) {
@@ -103,8 +105,7 @@ deliveries_for_dp_nums <- function(delivery_data, dp_nums) {
          return(Delivery(delivery_subset, key, value))
     }
 
-    res <- mapply(f, key=names(dp_nums), value=dp_nums, SIMPLIFY = FALSE)
-    names(res) <- NULL
+    res <- mapply(f, key=names(dp_nums), value=dp_nums, SIMPLIFY = FALSE, USE.NAMES = FALSE)
     return(res)
 }
 
@@ -305,16 +306,19 @@ convert_to_daily_consumption <- function(df) {
 ## Client view data objects and functions
 ClientData <- function(telemetry_data, delivery_data, telemetry_sitename,
                        dp_nums, tank_info_client) {
-    # Get the delivery data for the dp_nums
+    ## Get the delivery data for the dp_nums
     deliveries_data <- deliveries_for_dp_nums(delivery_data$data, dp_nums)
 
-    # Subset telemetry data
+    ## Subset telemetry data
     telem_sub <- telemetry_data$data[SITENAME == telemetry_sitename]
 
-    # Tank data for the telemetry subset
+    ## Tank data for the telemetry subset
     tanks_data <- tank_data_for_sitename(telem_sub,
                                         telemetry_sitename,
                                         tank_info_client)
+
+    ## Matching the time series
+    matched <- match_deliveries_tanks(deliveries_data, tanks_data, dp_nums)
 
     ## higher level information about the client
     country <- telem_sub[[1, "COUNTRY"]]
@@ -384,7 +388,7 @@ client_view_data <- function(sample_number = NULL, ...) {
 
     if (!is.null(sample_number)) {
         ## Create a consistent sample of the data
-        data_telemetry_sites <- telemetry_data$sites[1:100]
+        data_telemetry_sites <- telemetry_data$sites[1:sample_number]
     } else {
        data_telemetry_sites <- telemetry_data$sites
     }
@@ -443,25 +447,78 @@ split_erp_codes <- function(x) {
 }
 
 
-#' TODO: Double check these next two functions work in the case of 1 delivery
-#' for 2 tanks
-deliveries_for_tank <- function(tank, client) {
-    tank_id <- tank$id
-    dp_nums <- client$dp_nums
-    dp_dels <- names(dp_nums[dp_nums==tank_id])
+MatchedDelTel <- function(del, tel, del_dp, tanks_dp) {
+    #' Here tel variable is the deliveries calculated from the telemetry
 
-    f <- function(delivery) {
-        if (delivery$DPNumber %in% dp_dels) {
-            return(delivery)
+    match_df <- match_time_series(del, tel)
+    cor_match <- cor_matched_time_series(match_df)
+    best_start <- best_start_matching(match_df)
+    best_end <- best_end_matching(match_df)
+
+
+    structure(
+        list(
+            df = match_df,
+            cor = cor_match,
+            start = best_start,
+            end = best_end,
+            length = best_end - best_start,
+            dp = del_dp,
+            tanks = tanks_dp
+        ),
+        class = "MatchedDelTel"
+    )
+}
+
+
+match_deliveries_tanks <- function(deliveries, tanks, dp_nums) {
+    ## Two cases to work with 1 del DP -> 1 tank, 1 del DP -> multiple tanks
+
+    f <- function(del_dp, tanks_dp) {
+        actual_del <- delivery_ts(delivery_for_dp(del_dp, deliveries))
+
+        if (length(tanks_dp) == 1) {
+            ## Case: 1 del -> 1 tank
+            tel_del <- deliveries_from_telemetry(tank_for_id(tanks_dp, tanks)$telemetry)
         } else {
-            return(NULL)
+            ## Case: 1 del -> multiple tanks
+            ## We need to merge the telemetry deliveries from both tanks
+            ## To do so we merge the raw telemetry from both tanks
+            f2 <- pryr::partial(tank_for_id, tanks=tanks)
+            tel_list <- lapply(tanks_dp, . %>% .$telemetry %o% f2)
+            merged_tel <- aggregate(. ~ datetime, rbindlist(tel_list), sum)
+            tel_del <- deliveries_from_telemetry(merged_tel)
+        }
+        return(MatchedDelTel(actual_del, tel_del, del_dp, tanks_dp))
+    }
+    return(mapply(f, del_dp=names(dp_nums), tanks_dp=dp_nums, SIMPLIFY = FALSE, USE.NAMES = FALSE))
+}
+
+
+delivery_for_tank <- function(tank, client) {
+    for (delivery in client$delivery) {
+        if (tank$id %in% delivery$tanks) {
+            return(delivery)
         }
     }
+}
 
-    res <- lapply(client$delivery, f) %>%
-        plyr::compact()
 
-    return(res)
+delivery_for_dp <- function(dp, deliveries) {
+    for(delivery in deliveries) {
+        if (dp == delivery$DPNumber) {
+            return(delivery)
+        }
+    }
+}
+
+
+tank_for_id <- function(id, tanks) {
+    for (tank in tanks) {
+        if (id == tank$id) {
+            return(tank)
+        }
+    }
 }
 
 
@@ -485,9 +542,14 @@ tanks_for_delivery <- function(delivery, client) {
 }
 
 
-ts_for_delivery <- function(delivery) {
+delivery_ts <- function(delivery) {
     return(delivery$df[,c('ShiftRealStartDateTime', 'DeliveredQuantity')])
- }
+}
+
+
+cvd_dp_nums <- function(cvd) {
+     return(lapply(cvd, . %>% .$dp_nums))
+}
 
 
 if (FALSE) {  # Prevents it from running when sourcing the file
