@@ -202,10 +202,12 @@ head.TelemtryData <- function(x, ...) {
 
 
 ## Tank level data
-tank_data_for_sitename <- function(telem_sub, telemetry_sitename, tank_info_client) {
+tank_data_for_sitename <- function(telem_sub, telemetry_sitename, tank_info_client, dp_nums) {
     modified_tank_info_name <- FALSE
 
-    tank_info_tanks <- unique(tank_info_client[, "TelemetryLevelVariable"])
+    ## The tanks we have found in our tank_info
+    tank_info_tanks <- dp_nums
+
     ## Fix telemetry variable names
     if ("LIN_LEVEL_INCH" %in% tank_info_tanks) {
         tank_info_tanks[tank_info_tanks=="LIN_LEVEL_INCH"] = "LIN_Level_Inch"
@@ -228,7 +230,7 @@ tank_data_for_sitename <- function(telem_sub, telemetry_sitename, tank_info_clie
                                              TelemetryLevelVariable == tank)
             }
 
-            res <- Tank(tank, tank_info_sub_tank,telemetry_tank)
+            res <- Tank(tank, tank_info_sub_tank, telemetry_tank)
             return(res)
         }
 
@@ -236,7 +238,7 @@ tank_data_for_sitename <- function(telem_sub, telemetry_sitename, tank_info_clie
         names(res) <- NULL
         return(res)
     } else {
-        warning(cat("Mismatched telemetry variable names for site ", telemetry_sitename))
+        warning(cat("Mismatched telemetry variable names for site ", telemetry_sitename, "\n"))
         return(NULL)
     }
 }
@@ -315,7 +317,8 @@ ClientData <- function(telemetry_data, delivery_data, telemetry_sitename,
     ## Tank data for the telemetry subset
     tanks_data <- tank_data_for_sitename(telem_sub,
                                         telemetry_sitename,
-                                        tank_info_client)
+                                        tank_info_client,
+                                        dp_nums)
 
     ## Matching the time series
     matched <- match_deliveries_tanks(deliveries_data, tanks_data, dp_nums)
@@ -331,6 +334,8 @@ ClientData <- function(telemetry_data, delivery_data, telemetry_sitename,
         address <- "500 W Renner Rd"
     } else if (telemetry_sitename == "VARIANPA_CA") {
         address <- "911 Hansen Way"
+    } else if (telemetry_sitename == "A_ALLISON_IN") {
+        addres  <- tank_info_client[1, "Address Line2"]
     } else {
         address <- tank_info_client[1, "Address Line1"]
     }
@@ -369,6 +374,7 @@ client_view_data <- function(sample_number = NULL, ...) {
 
     print("Loading merge table")
     tank_info <- readxl::read_excel("../data/internship data/US Tank info.xlsx") %>%
+        dplyr::mutate_all(function(x) ifelse(x == "NULL", NA, x)) %>%
         as.data.frame
 
     ## Actual telemetry sites in our merge table
@@ -454,11 +460,13 @@ MatchedDelTel <- function(del, tel, del_dp, tanks_dp) {
     cor_match <- cor_matched_time_series(match_df)
     best_start <- best_start_matching(match_df)
     best_end <- best_end_matching(match_df)
+    ratio <- matching_ratio(match_df[best_start:best_end,])
 
 
     structure(
         list(
             df = match_df,
+            ratio = ratio,
             cor = cor_match,
             start = best_start,
             end = best_end,
@@ -486,7 +494,7 @@ match_deliveries_tanks <- function(deliveries, tanks, dp_nums) {
             ## To do so we merge the raw telemetry from both tanks
             f2 <- pryr::partial(tank_for_id, tanks=tanks)
             tel_list <- lapply(tanks_dp, . %>% .$telemetry %o% f2)
-            merged_tel <- aggregate(. ~ datetime, rbindlist(tel_list), sum)
+            merged_tel <- aggregate(. ~ datetime, data.table::rbindlist(tel_list), sum)
             tel_del <- deliveries_from_telemetry(merged_tel)
         }
         return(MatchedDelTel(actual_del, tel_del, del_dp, tanks_dp))

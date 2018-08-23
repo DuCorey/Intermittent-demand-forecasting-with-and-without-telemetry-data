@@ -148,7 +148,7 @@ cor_matched_time_series <- function(df) {
 
 
 matching_ratio <- function(df) {
-    return(sum(is.na(df[[1]]))/nrow(df))
+    return(sum(complete.cases(df))/nrow(df))
 }
 
 
