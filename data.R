@@ -206,7 +206,7 @@ tank_data_for_sitename <- function(telem_sub, telemetry_sitename, tank_info_clie
     modified_tank_info_name <- FALSE
 
     ## The tanks we have found in our tank_info
-    tank_info_tanks <- dp_nums
+    tank_info_tanks <- unlist(dp_nums)
 
     ## Fix telemetry variable names
     if ("LIN_LEVEL_INCH" %in% tank_info_tanks) {
@@ -215,32 +215,24 @@ tank_data_for_sitename <- function(telem_sub, telemetry_sitename, tank_info_clie
         og_tank <- "LIN_LEVEL_INCH"
     }
 
-    telem_tanks <- sapply(unique(telem_sub[, "VARNAME"]), as.character)
+    f <- function(tank) {
+        telemetry_tank <- telem_sub[VARNAME == tank]
 
-    if (setequal(tank_info_tanks, telem_tanks)) {
-
-        f <- function(tank) {
-            telemetry_tank <- telem_sub[VARNAME == tank]
-
-            if (modified_tank_info_name) {
-                tank_info_sub_tank <- subset(tank_info_client,
-                                             TelemetryLevelVariable == og_tank)
-            } else {
-                tank_info_sub_tank <- subset(tank_info_client,
-                                             TelemetryLevelVariable == tank)
-            }
-
-            res <- Tank(tank, tank_info_sub_tank, telemetry_tank)
-            return(res)
+        if (modified_tank_info_name) {
+            tank_info_sub_tank <- subset(tank_info_client,
+                                         TelemetryLevelVariable == og_tank)
+        } else {
+            tank_info_sub_tank <- subset(tank_info_client,
+                                         TelemetryLevelVariable == tank)
         }
 
-        res <- lapply(telem_tanks, f)
-        names(res) <- NULL
+        res <- Tank(tank, tank_info_sub_tank, telemetry_tank)
         return(res)
-    } else {
-        warning(cat("Mismatched telemetry variable names for site ", telemetry_sitename, "\n"))
-        return(NULL)
     }
+
+    res <- lapply(tank_info_tanks, f)
+    names(res) <- NULL
+    return(res)
 }
 
 
@@ -308,17 +300,19 @@ convert_to_daily_consumption <- function(df) {
 ## Client view data objects and functions
 ClientData <- function(telemetry_data, delivery_data, telemetry_sitename,
                        dp_nums, tank_info_client) {
-    ## Get the delivery data for the dp_nums
-    deliveries_data <- deliveries_for_dp_nums(delivery_data$data, dp_nums)
 
     ## Subset telemetry data
     telem_sub <- telemetry_data$data[SITENAME == telemetry_sitename]
 
     ## Tank data for the telemetry subset
+    ## MAYBE: Do we need to check if the tank is in the telemetry data.
     tanks_data <- tank_data_for_sitename(telem_sub,
-                                        telemetry_sitename,
-                                        tank_info_client,
-                                        dp_nums)
+                                         telemetry_sitename,
+                                         tank_info_client,
+                                         dp_nums)
+
+    ## Get the delivery data for the dp_nums
+    deliveries_data <- deliveries_for_dp_nums(delivery_data$data, dp_nums)
 
     ## Matching the time series
     matched <- match_deliveries_tanks(deliveries_data, tanks_data, dp_nums)
@@ -335,7 +329,7 @@ ClientData <- function(telemetry_data, delivery_data, telemetry_sitename,
     } else if (telemetry_sitename == "VARIANPA_CA") {
         address <- "911 Hansen Way"
     } else if (telemetry_sitename == "A_ALLISON_IN") {
-        addres  <- tank_info_client[1, "Address Line2"]
+        address <- tank_info_client[1, "Address Line2"]
     } else {
         address <- tank_info_client[1, "Address Line1"]
     }
@@ -361,21 +355,28 @@ ClientData <- function(telemetry_data, delivery_data, telemetry_sitename,
 }
 
 
-client_view_data <- function(sample_number = NULL, ...) {
-    print("Loading Telemetry Data")
-    ##telemetry_data <- TelemetryData()
-    telemetry_data <- readRDS(file = "../data/master/telemetry.rds")
+client_view_data <- function(sample_number = NULL) {
+    if (!exists("telemetry_data")) {
+        print("Loading Telemetry Data")
+        ##telemetry_data <- TelemetryData()
+        telemetry_data <- readRDS(file = "../data/master/telemetry.rds")
+    }
     telemetry_data$data %<>% data.table::as.data.table()
 
-    print("Loading Delivery Data")
-    ##delivery_data <- DeliveryData()
-    delivery_data <- readRDS(file = "../data/master/delivery.rds")
+    if (!exists("delivery_data")) {
+        print("Loading Delivery Data")
+        ##delivery_data <- DeliveryData()
+        delivery_data <- readRDS(file = "../data/master/delivery.rds")
+    }
     delivery_data$data %<>% data.table::as.data.table()
 
-    print("Loading merge table")
-    tank_info <- readxl::read_excel("../data/internship data/US Tank info.xlsx") %>%
-        dplyr::mutate_all(function(x) ifelse(x == "NULL", NA, x)) %>%
-        as.data.frame
+    if (!exists("tank_info")) {
+        print("Loading merge table")
+        tank_info <- readxl::read_excel("../data/internship data/US Tank info.xlsx") %>%
+            dplyr::mutate_all(function(x) ifelse(x == "NULL", NA, x)) %>%
+            as.data.frame
+    }
+
 
     ## Actual telemetry sites in our merge table
     tank_info_telemetry_sites <- unique(tank_info$TelemetrySitename)
@@ -460,7 +461,14 @@ MatchedDelTel <- function(del, tel, del_dp, tanks_dp) {
     cor_match <- cor_matched_time_series(match_df)
     best_start <- best_start_matching(match_df)
     best_end <- best_end_matching(match_df)
-    ratio <- matching_ratio(match_df[best_start:best_end,])
+
+    ## If we best_start and best_end are identical or can't be found.
+    ## best_start:best_end will have no length and give us an error
+    ratio <- tryCatch({
+        matching_ratio(match_df[best_start:best_end,])
+    }, error = function(cond) {
+        return(NA)
+    })
 
 
     structure(
