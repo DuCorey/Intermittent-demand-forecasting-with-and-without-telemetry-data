@@ -35,10 +35,11 @@ sitename <- "A_MEDJHSN_MI"
 sitename <- "A_ADM_IL"
 sitename <- "A_ALLISON_IN"
 sitename <- "A_BWCS_KY"
+sitename <- "A_MICRO_TN"
 
 tank_info_subset <- subset(tank_info, TelemetrySitename == sitename)
 dp_nums <- depot_numbers_from_sitename_tank_info_subset(tank_info_subset)
-dp_nums <- dp_nums[names(dp_nums) %in% delivery$DPNumbers]
+dp_nums <- dp_nums[names(dp_nums) %in% delivery_data$DPNumbers]
 
 deliveries_data <- deliveries_for_dp_nums(as.data.table(delivery_data$data), dp_nums)
 telem_sub <- subset(telemetry_data$data, SITENAME == sitename)

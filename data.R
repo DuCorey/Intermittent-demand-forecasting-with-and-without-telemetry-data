@@ -315,7 +315,8 @@ ClientData <- function(telemetry_data, delivery_data, telemetry_sitename,
     deliveries_data <- deliveries_for_dp_nums(delivery_data$data, dp_nums)
 
     ## Matching the time series
-    matched <- match_deliveries_tanks(deliveries_data, tanks_data, dp_nums)
+    matched <- match_deliveries_tanks(deliveries_data, tanks_data, dp_nums) %>%
+        plyr::compact()  # Should we fail to do a matching remove it from the result
 
     ## higher level information about the client
     country <- telem_sub[[1, "COUNTRY"]]
@@ -492,7 +493,6 @@ match_deliveries_tanks <- function(deliveries, tanks, dp_nums) {
 
     f <- function(del_dp, tanks_dp) {
         actual_del <- delivery_ts(delivery_for_dp(del_dp, deliveries))
-
         if (length(tanks_dp) == 1) {
             ## Case: 1 del -> 1 tank
             tel_del <- deliveries_from_telemetry(tank_for_id(tanks_dp, tanks)$telemetry)
@@ -505,7 +505,11 @@ match_deliveries_tanks <- function(deliveries, tanks, dp_nums) {
             merged_tel <- aggregate(. ~ datetime, data.table::rbindlist(tel_list), sum)
             tel_del <- deliveries_from_telemetry(merged_tel)
         }
-        return(MatchedDelTel(actual_del, tel_del, del_dp, tanks_dp))
+        if (is.null(tel_del)) {
+            return(NULL)
+        } else {
+            return(MatchedDelTel(actual_del, tel_del, del_dp, tanks_dp))
+        }
     }
     return(mapply(f, del_dp=names(dp_nums), tanks_dp=dp_nums, SIMPLIFY = FALSE, USE.NAMES = FALSE))
 }

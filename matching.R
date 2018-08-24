@@ -37,11 +37,17 @@ deliveries_from_telemetry <- function(telemetry, threshold = 10) {
             j <- j + 1
         }
     }
-    ## The date has to be converted back into POSIXct from numeric as the raw
-    ## vector containing the dates is the numeric values. Still need to supply
-    ## the unix origin for POSIXct.
-    return(data.frame(Date=as.POSIXct.numeric(date, origin = '1970-01-01 00:00:00'),
-                      Amount=amount))
+
+    if (length(date) == 0) {
+        ## If we didn't find any deliveries in our telemetry data
+        return(NULL)
+    } else {
+        ## The date has to be converted back into POSIXct from numeric as the raw
+        ## vector containing the dates is the numeric values. Still need to supply
+        ## the unix origin for POSIXct.
+        return(data.frame(Date=as.POSIXct.numeric(date, origin = '1970-01-01 00:00:00'),
+                          Amount=amount))
+    }
 }
 
 
