@@ -203,31 +203,26 @@ head.TelemtryData <- function(x, ...) {
 
 ## Tank level data
 tank_data_for_sitename <- function(telem_sub, telemetry_sitename, tank_info_client, dp_nums) {
-    modified_tank_info_name <- FALSE
+    modified_tel_tank_name <- FALSE
 
     ## The tanks we have found in our tank_info
     tank_info_tanks <- unlist(dp_nums)
 
     ## Fix telemetry variable names
     if ("LIN_LEVEL_INCH" %in% tank_info_tanks) {
-        tank_info_tanks[tank_info_tanks=="LIN_LEVEL_INCH"] = "LIN_Level_Inch"
-        modified_tank_info_name <- TRUE
-        og_tank <- "LIN_LEVEL_INCH"
+        new_tel_tank <- "LIN_Level_Inch"
+        modified_tel_tank_name <- TRUE
     }
 
     f <- function(tank) {
-        telemetry_tank <- telem_sub[VARNAME == tank]
-
-        if (modified_tank_info_name) {
-            tank_info_sub_tank <- subset(tank_info_client,
-                                         TelemetryLevelVariable == og_tank)
+        if (modified_tel_tank_name) {
+            telemetry_tank <- telem_sub[VARNAME == new_tel_tank]
         } else {
-            tank_info_sub_tank <- subset(tank_info_client,
-                                         TelemetryLevelVariable == tank)
+            telemetry_tank <- telem_sub[VARNAME == tank]
         }
-
-        res <- Tank(tank, tank_info_sub_tank, telemetry_tank)
-        return(res)
+        tank_info_sub_tank <- subset(tank_info_client,
+                                         TelemetryLevelVariable == tank)
+        return(Tank(tank, tank_info_sub_tank, telemetry_tank))
     }
 
     res <- lapply(tank_info_tanks, f)
@@ -343,7 +338,7 @@ ClientData <- function(telemetry_data, delivery_data, telemetry_sitename,
                         sep = "_"),
             sitename = as.character(telemetry_sitename),
             dp_nums = dp_nums,
-            country = as.character(country),  # requires unlist because of data.table
+            country = as.character(country),
             state = as.character(state),
             city = as.character(city),
             zip = as.character(zip),
@@ -396,7 +391,7 @@ client_view_data <- function(sample_number = NULL) {
 
     if (!is.null(sample_number)) {
         ## Create a consistent sample of the data
-        data_telemetry_sites <- telemetry_data$sites[1:sample_number]
+        data_telemetry_sites <- telemetry_data$sites[1:100]
     } else {
        data_telemetry_sites <- telemetry_data$sites
     }

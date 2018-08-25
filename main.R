@@ -7,7 +7,7 @@ setwd("/home/corey/AL/code")
 source("data.R")
 
 #' Repl options
-options(max.print = 1000)
+options(max.print = 1000, error=recover)
 
 #' Data objects
 delivery_data <- DeliveryData()
@@ -19,7 +19,7 @@ tank_info <- readxl::read_excel("../data/internship data/US Tank info.xlsx") %>%
     dplyr::mutate_all(function(x) ifelse(x == "NULL", NA, x)) %>%
     as.data.frame
 
-sample <- client_view_data(sample_number = 100)
+sample_end <- client_view_data(sample_number = 100)
 
 cvd <- client_view_data()
 
@@ -36,6 +36,7 @@ sitename <- "A_ADM_IL"
 sitename <- "A_ALLISON_IN"
 sitename <- "A_BWCS_KY"
 sitename <- "A_MICRO_TN"
+sitename <- "SAFEWAY13N_CA"
 
 tank_info_subset <- subset(tank_info, TelemetrySitename == sitename)
 dp_nums <- depot_numbers_from_sitename_tank_info_subset(tank_info_subset)
@@ -47,7 +48,6 @@ tanks_data <- tank_data_for_sitename(as.data.table(telem_sub), sitename, tank_in
 matched <- match_deliveries_tanks(deliveries_data, tanks_data, dp_nums)
 
 ## What happens with the matching if there's nothing possible
-
 
 
 ## Matching
