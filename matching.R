@@ -45,8 +45,10 @@ deliveries_from_telemetry <- function(telemetry, threshold = 10) {
         ## The date has to be converted back into POSIXct from numeric as the raw
         ## vector containing the dates is the numeric values. Still need to supply
         ## the unix origin for POSIXct.
-        return(data.frame(Date=as.POSIXct.numeric(date, origin = '1970-01-01 00:00:00'),
-                          Amount=amount))
+        res <- data.frame(Date=as.POSIXct.numeric(date, origin = '1970-01-01 00:00:00'),
+                          Amount=amount) %>%
+            plyr::arrange(., Date)
+        return(res)
     }
 }
 
@@ -59,9 +61,6 @@ is_POSIXct <- function(x) {
     return(inherits(x, 'POSIXct'))
 }
 
-
-## TODO have an adaptible time_window, since if it is too large there could be overlap
-## IE the time_window shouldn't be large than the two closest times in either time series
 
 match_time_series <- function(a, b, time_window=10) {
     #' Match two time series time index together
@@ -83,8 +82,15 @@ match_time_series <- function(a, b, time_window=10) {
     a %<>% dplyr::arrange(.[[1]])
     b %<>% dplyr::arrange(.[[1]])
 
-    ## time_list$year <- lubridate::year(time_list$RealStartDateTime)
-    ## time_list$week <- lubridate::week(time_list$RealStartDateTime)
+    ## To improve the speed as well as reduce the
+    flipped <- FALSE
+    if (nrow(b) < nrow(a)) {
+        new_a <- b
+        new_b <- a
+        a <- new_a
+        b <- new_b
+        flipped <- TRUE
+    }
 
     matches <- vector(mode = "logical", length = nrow(b))
 
@@ -141,6 +147,10 @@ match_time_series <- function(a, b, time_window=10) {
     merged_time[is.na(merged_time)] <- res_df[,3][is.na(res_df[,1])]
     res_df <- res_df[order(merged_time),]
     rownames(res_df) <- NULL
+
+    if (flipped) {
+        res_df <- res_df[,c(3,4,1,2,5)]
+    }
 
     ##class(res_df) <- c("MatchedTimeSeries", class(res_df))
 

@@ -16,6 +16,7 @@ library(magrittr)
 library(readxl)
 library(data.table)
 library(lubridate)
+library(xts)
 
 
 #' functions
@@ -24,19 +25,22 @@ source("matching.R")
 
 "%o%" <- pryr::compose
 
-read_csv_skip_second_line <- function(file) {
+read_csv_skip_second_line <- function(file)
+{
     data <- read.csv(file, header = TRUE, stringsAsFactors = FALSE)
     return(data[-1,])
 }
 
-fix_raw_delivery_column_names <- function(data) {
+fix_raw_delivery_column_names <- function(data)
+{
     colnames(data)[which(names(data) == "ExternalDeliveryNote")] <- "ExtDeliveryNote"
     return(data)
 }
 
 ### data objects
 ## Delivery data
-DeliveryData <- function() {
+DeliveryData <- function()
+{
     sources <- c("../data/internship data/Reports/2015",
                  "../data/internship data/Reports/2016",
                  "../data/internship data/Reports")
@@ -51,8 +55,8 @@ DeliveryData <- function() {
         ## We only keep distinct deliveries based on ShiftRealStartDateTime
         dplyr::distinct(., ShiftRealStartDateTime, DPNumber, .keep_all = TRUE)
 
-    #' Convert strings to dates
-    #' First convert empty strings into NA so that the conversion to POSIXct can work
+    ## Convert strings to dates
+    ## First convert empty strings into NA so that the conversion to POSIXct can work
     merged_data$RealStartDateTime[merged_data$RealStartDateTime == ""]           <- NA
     merged_data$ShiftRealStartDateTime[merged_data$ShiftRealStartDateTime == ""] <- NA
     merged_data$ConfirmationDate[merged_data$ConfirmationDate == ""]             <- NA
@@ -61,23 +65,23 @@ DeliveryData <- function() {
     merged_data$ShiftRealStartDateTime %<>% as.POSIXct(., tz = "America/New_York")
     merged_data$ConfirmationDate       %<>% as.POSIXct(., tz = "America/New_York")
 
-    #' Clean data
-    #' TODO
-    #' Speed up subsetting using data.table
+    ## Clean data
+    ## TODO
+    ## Speed up subsetting using data.table
     merged_data %<>% data.table::as.data.table() %>%
-        #' Remove rows with 0 delivered quantity
+        ## Remove rows with 0 delivered quantity
         .[DeliveredQuantity > 0]
 
 
     # Determine unique client depot numbers
-    dps = unique(merged_data[["DPNumber"]])
+    dps <- unique(merged_data[["DPNumber"]])
 
 
     structure(
         list(
             sources = sources,
             files = files,
-            data = merged_data,
+            data = data.table::as.data.table(merged_data),
             DPNumbers = dps
         ),
         class="DeliveryData"
@@ -85,32 +89,38 @@ DeliveryData <- function() {
 }
 
 
-print.DeliveryData <- function(x, ...) {
+print.DeliveryData <- function(x, ...)
+{
     invisible(x)
 }
 
-summary.DeliveryData <- function(x, ...) {
+summary.DeliveryData <- function(x, ...)
+{
     summary(x$data)
 }
 
-head.DeliveryData <- function(x, ...) {
+head.DeliveryData <- function(x, ...)
+{
     head(x$data)
 }
 
 
-deliveries_for_dp_nums <- function(delivery_data, dp_nums) {
+## deliveries_for_dp_nums <- function(delivery_data, dp_nums)
+##{
 
-    f <- function(key, value) {
-         delivery_subset <- delivery_data[DPNumber == key]
-         return(Delivery(delivery_subset, key, value))
-    }
+    ##     f <- function(key, value)
+    ##{
+##          delivery_subset <- delivery_data[DPNumber == key]
+##          return(Delivery(delivery_subset, key, value))
+##     }
 
-    res <- mapply(f, key=names(dp_nums), value=dp_nums, SIMPLIFY = FALSE, USE.NAMES = FALSE)
-    return(res)
-}
+##     res <- mapply(f, key=names(dp_nums), value=dp_nums, SIMPLIFY = FALSE, USE.NAMES = FALSE)
+##     return(res)
+## }
 
 
-Delivery <- function(df, dp_num, tanks) {
+Delivery <- function(df, dp_num)
+{
     data <- subset(df, select = c("DispatchZoneCode",
                                   "DispatchCenterCode",
                                   "DeliveringDispatchZoneCode",
@@ -154,15 +164,16 @@ Delivery <- function(df, dp_num, tanks) {
     structure(
         list(
             DPNumber = dp_num,
-            df = data,
-            tanks = tanks
+            df = data
+            ## tanks = tanks
         ),
         class = "Delivery"
     )
 }
 
 ## Telemetry data
-TelemetryData <- function() {
+TelemetryData <- function()
+{
     files <- c("../data/internship data/VW_LEVEL_AND_PRESSURE_IM.csv")
 
     data <- read.csv(files, header = TRUE, stringsAsFactors=FALSE)
@@ -181,57 +192,32 @@ TelemetryData <- function() {
     structure(
         list(
             files = files,
-            data = data,
+            data = data.table::as.data.table(data),
             sites = sites
         ),
         class = "TelemetryData"
     )
 }
 
-print.TelemetryData <- function(x, ...) {
+print.TelemetryData <- function(x, ...)
+{
     invisible(x)
 }
 
-summary.TelemetryData <- function(x, ...) {
+summary.TelemetryData <- function(x, ...)
+{
     summary(x$data)
 }
 
-head.TelemtryData <- function(x, ...) {
+head.TelemtryData <- function(x, ...)
+{
     head(x$data)
 }
 
 
 ## Tank level data
-tank_data_for_sitename <- function(telem_sub, telemetry_sitename, tank_info_client, dp_nums) {
-    modified_tel_tank_name <- FALSE
-
-    ## The tanks we have found in our tank_info
-    tank_info_tanks <- unlist(dp_nums)
-
-    ## Fix telemetry variable names
-    if ("LIN_LEVEL_INCH" %in% tank_info_tanks) {
-        new_tel_tank <- "LIN_Level_Inch"
-        modified_tel_tank_name <- TRUE
-    }
-
-    f <- function(tank) {
-        if (modified_tel_tank_name) {
-            telemetry_tank <- telem_sub[VARNAME == new_tel_tank]
-        } else {
-            telemetry_tank <- telem_sub[VARNAME == tank]
-        }
-        tank_info_sub_tank <- subset(tank_info_client,
-                                         TelemetryLevelVariable == tank)
-        return(Tank(tank, tank_info_sub_tank, telemetry_tank))
-    }
-
-    res <- lapply(tank_info_tanks, f)
-    names(res) <- NULL
-    return(res)
-}
-
-
-Tank <- function(tank, tank_info_sub_tank, telemetry_subset) {
+Tank <- function(tank, tank_info_sub_tank, telemetry_subset, sitename)
+{
     ## Tank information
     product <- tank_info_sub_tank[, "Product"]
     max_level <- tank_info_sub_tank[, "MaxLevel"]
@@ -240,7 +226,7 @@ Tank <- function(tank, tank_info_sub_tank, telemetry_subset) {
     capacity <- tank_info_sub_tank[, "Capacity"]
     capacity_unit <- tank_info_sub_tank[, "Abbreviation"]
     timezone <- telemetry_subset[1, "TIMEZONE"]
-##    varname <- telemetry_subset[1, "VARNAME"]
+
     unit <- telemetry_subset[1, "CUSTOMERUNIT"]
     rtu <- telemetry_subset[1, "RTUTYPE"]
 
@@ -248,7 +234,7 @@ Tank <- function(tank, tank_info_sub_tank, telemetry_subset) {
     ## The time series
     consumption_serie <- convert_to_daily_consumption(telemetry_subset)
     telemetry_serie <- telemetry_subset[, c("DATETIME", "CUSTOMERVALUE")] %>%
-        arrange(., DATETIME)
+        plyr::arrange(., DATETIME)
     colnames(telemetry_serie) <- c("datetime", "level")
     rownames(telemetry_serie) <- NULL
 
@@ -256,6 +242,7 @@ Tank <- function(tank, tank_info_sub_tank, telemetry_subset) {
     structure(
         list(
             id = as.character(tank),
+            sitename = sitename,
             unit = as.character(unit),
             product = as.character(product),
             max.level = as.numeric(max_level),
@@ -265,7 +252,6 @@ Tank <- function(tank, tank_info_sub_tank, telemetry_subset) {
             capacity.unit = as.character(capacity_unit),
 
             timezone = as.numeric(timezone),
-##            varname = as.character(varname),
             unit = as.character(unit),
             rtu = as.character(rtu),
 
@@ -277,7 +263,8 @@ Tank <- function(tank, tank_info_sub_tank, telemetry_subset) {
 }
 
 
-convert_to_daily_consumption <- function(df) {
+convert_to_daily_consumption <- function(df)
+{
     ## Currently the first day may not be complete.
     ## Impact should be minor though.
 
@@ -292,39 +279,74 @@ convert_to_daily_consumption <- function(df) {
 }
 
 
+tank_data_for_sitename <- function(telemetry_data, tank_info_client, sitename,
+                                   tanks)
+{
+    telem_sub <- telemetry_data[SITENAME == sitename]
+
+    ## Fix telemetry variable names
+    modified_tel_tank_name <- FALSE
+    if ("LIN_LEVEL_INCH" %in% tanks) {
+        new_tel_tank <- "LIN_Level_Inch"
+        modified_tel_tank_name <- TRUE
+    }
+
+    f <- function(tank)
+    {
+        if (modified_tel_tank_name) {
+            telemetry_tank <- telem_sub[VARNAME == new_tel_tank]
+        } else {
+            telemetry_tank <- telem_sub[VARNAME == tank]
+        }
+        tank_info_sub_tank <- tank_info_client[TelemetryLevelVariable == tank &
+                                               TelemetrySitename == sitename]
+
+        return(Tank(tank, tank_info_sub_tank, telemetry_tank, sitename))
+    }
+
+    res <- lapply(tanks, f)
+    names(res) <- NULL
+    return(res)
+}
+
+
 ## Client view data objects and functions
-ClientData <- function(telemetry_data, delivery_data, telemetry_sitename,
-                       dp_nums, tank_info_client) {
+ClientData <- function(depot_number, telemetry_data, delivery_data,
+                       sites_tanks, tank_info_client)
+{
+    ## Site and tank data for the sites_tanks linked list
+    ## We can have multiple sites and 1 site can also have multiple tanks
+    f <- pryr::partial(tank_data_for_sitename,
+                       telemetry_data = telemetry_data,
+                       tank_info_client = tank_info_client)
 
-    ## Subset telemetry data
-    telem_sub <- telemetry_data$data[SITENAME == telemetry_sitename]
+    ## When the case is a site with multiple tanks the output is a matrix with 1 column.
+    ## In the case with multiple sites we return a list.
+    ## Wrapping the result in `c` makes the output consistent in those cases.
+    tanks_data <- c(mapply(f, sitename = names(sites_tanks), tanks = sites_tanks,
+                           USE.NAMES = FALSE))
 
-    ## Tank data for the telemetry subset
-    ## MAYBE: Do we need to check if the tank is in the telemetry data.
-    tanks_data <- tank_data_for_sitename(telem_sub,
-                                         telemetry_sitename,
-                                         tank_info_client,
-                                         dp_nums)
 
-    ## Get the delivery data for the dp_nums
-    deliveries_data <- deliveries_for_dp_nums(delivery_data$data, dp_nums)
+    ## Get the delivery data for the depot_number
+    deliverie_data <- Delivery(delivery_data[DPNumber==depot_number], depot_number)
 
     ## Matching the time series
-    matched <- match_deliveries_tanks(deliveries_data, tanks_data, dp_nums) %>%
+    matched <- match_deliverie_tanks(deliverie_data, tanks_data, depot_number) %>%
         plyr::compact()  # Should we fail to do a matching remove it from the result
 
-    ## higher level information about the client
-    country <- telem_sub[[1, "COUNTRY"]]
+    ## higher level information about client
+    ## Even if there may be multiple sitenames for each depot_number, they share
+    ## the same address.
     state <- tank_info_client[1, "State"]
     city <- tank_info_client[1, "City"]
     zip <- tank_info_client[1, "Zip"]
 
     # Some manual fixes for address names
-    if (telemetry_sitename == "TRIQUIN2_TX") {
-        address <- "500 W Renner Rd"
-    } else if (telemetry_sitename == "VARIANPA_CA") {
+    if ((depot_number == "140041") | (depot_number == "140043")) {
+        address <- tank_info_client[1, "Address Line2"]
+    } else if (depot_number == "12580") {
         address <- "911 Hansen Way"
-    } else if (telemetry_sitename == "A_ALLISON_IN") {
+    } else if (depot_number == "70350") {
         address <- tank_info_client[1, "Address Line2"]
     } else {
         address <- tank_info_client[1, "Address Line1"]
@@ -333,25 +355,22 @@ ClientData <- function(telemetry_data, delivery_data, telemetry_sitename,
 
     structure(
         list(
-            UID = paste(telemetry_sitename,
-                        paste(names(dp_nums), collapse = "_"),
-                        sep = "_"),
-            sitename = as.character(telemetry_sitename),
-            dp_nums = dp_nums,
-            country = as.character(country),
+            DP = depot_number,
             state = as.character(state),
             city = as.character(city),
             zip = as.character(zip),
             address= as.character(address),
-            delivery = deliveries_data,
-            tank = tanks_data
+            delivery = deliverie_data,
+            tank = tanks_data,
+            matched = matched
         ),
         class = "Client"
     )
 }
 
 
-client_view_data <- function(sample_number = NULL) {
+client_view_data <- function(sample_number = NULL)
+{
     if (!exists("telemetry_data")) {
         print("Loading Telemetry Data")
         ##telemetry_data <- TelemetryData()
@@ -370,90 +389,132 @@ client_view_data <- function(sample_number = NULL) {
         print("Loading merge table")
         tank_info <- readxl::read_excel("../data/internship data/US Tank info.xlsx") %>%
             dplyr::mutate_all(function(x) ifelse(x == "NULL", NA, x)) %>%
-            as.data.frame
+            tidyr::drop_na(., TelemetrySitename, TelemetryLevelVariable, `Storage ERPCode`)
+
+        ## Create our actual Depot Number column from the Storage ERPCode
+        tank_info[['DPNumber']] <- sapply(tank_info[['Storage ERPCode']],
+                                          split_erp_codes,
+                                          USE.NAMES = FALSE)
     }
+    tank_info %<>% data.table::as.data.table()
 
 
-    ## Actual telemetry sites in our merge table
-    tank_info_telemetry_sites <- unique(tank_info$TelemetrySitename)
+    ## We iterate over the Depot Numbers found in our merge table
+    ## For each DPNumber, we obtain the Client data if we can find a matching sitename.
+    ## If we cannot match a sitename, then we return NULL.
+    depot_numbers <- unique(tank_info[['DPNumber']]) %>%
+        ## Remove the depot numbers not in the delivery data
+        intersect(., delivery_data$DPNumbers)
 
-
-    ## We iterate over the telemetry sitenames in our telemetry data
-    ## For each site, we obtain the Client data should we are able to match the
-    ## sitename to DPNumber in our deliveries. If we cannot match a DPNumber,
-    ## then we return NULL.
-
-    f <- pryr::partial(client_data_for_telemetry_sitename,
+    f <- pryr::partial(client_data_for_depot_number,
                        telemetry_data = telemetry_data,
-                       delivery_data = delivery_data,
-                       tank_info = tank_info,
-                       tank_info_telemetry_sites = tank_info_telemetry_sites)
+                       delivery_data = delivery_data$data,
+                       tank_info = tank_info)
 
     if (!is.null(sample_number)) {
         ## Create a consistent sample of the data
-        data_telemetry_sites <- telemetry_data$sites[1:100]
+        actual_depot_numbers <- depot_numbers[1:sample_number]
     } else {
-       data_telemetry_sites <- telemetry_data$sites
+       actual_depot_numbers <- depot_numbers
     }
 
     print("Merging delivery and consumption")
 
-    client_data <- lapply_pb(data_telemetry_sites, f) %>%
+    client_data <- lapply_pb(actual_depot_numbers, f) %>%
         plyr::compact()  #Remove NULL entries in the client_data list
 
     return(client_data)
 }
 
 
-client_data_for_telemetry_sitename <- function(telemetry_data, delivery_data,
-                                               telemetry_sitename, tank_info,
-                                               tank_info_telemetry_sites) {
-    ## First check if our telemetry sitanem is in our tank info merge table
-    if (telemetry_sitename %in% tank_info_telemetry_sites) {
+client_data_for_depot_number <- function(depot_number, telemetry_data,
+                                         delivery_data, tank_info)
+{
+    print(depot_number)
+    tank_info_client <- tank_info[DPNumber==depot_number]
+    sites_tanks <- sites_tanks_for_depot_subset(tank_info_client, telemetry_data$sites)
 
-        tank_info_subset <- subset(tank_info,
-                                   TelemetrySitename == telemetry_sitename)
-        dp_nums <- depot_numbers_from_sitename_tank_info_subset(tank_info_subset)
-
-        ## Check if the depot numbers are in our delivery data
-        dp_nums <- dp_nums[names(dp_nums) %in% delivery_data$DPNumbers]
-
-        if (length(dp_nums) > 0) {
-            ## Both conditions are met, we then return the data object for a client
-            return(ClientData(telemetry_data, delivery_data, telemetry_sitename,
-                              dp_nums, tank_info_subset))
-        } else {
-            return(NULL)
-        }
+    ## If we didn't find a matching site for our depot number it will be an empty list
+    if (length(sites_tanks) > 0) {
+        return(ClientData(depot_number, telemetry_data$data, delivery_data,
+                          sites_tanks, tank_info_client))
     } else {
         return(NULL)
     }
 }
 
 
-depot_numbers_from_sitename_tank_info_subset <- function(df) {
-    dp_nums = list()
-
-    for (i in 1:nrow(df)) {
-        erp_code <- as.character(split_erp_codes(df[i, "Storage ERPCode"]))
-        tank <- df[i, "TelemetryLevelVariable"]
-        ## append to the list the tank
-        dp_nums[[erp_code]] <- c(dp_nums[[erp_code]], tank)
+sites_tanks_for_depot_subset <- function(tank_info_client, telemetry_sites)
+{
+    sites <- list()
+    for (i in 1:nrow(tank_info_client)) {
+        sitename <- as.character(tank_info_client[i, "TelemetrySitename"])
+        ## Check if the sitename is in our telemety_data sites
+        if (sitename %in% telemetry_sites) {
+            tank <- as.character(tank_info_client[i, "TelemetryLevelVariable"])
+            sites[[sitename]] <- c(sites[[sitename]], tank)
+        }
     }
-    return(dp_nums)
+    return(sites)
 }
 
 
-split_erp_codes <- function(x) {
-    split <- strsplit(x, "_")
+sites_tanks_for_depot_number <- function(depot_number, telemetry_data,
+                                         delivery_data, tank_info)
+{
+    tank_info_subset <- tank_info[DPNumber==depot_number]
+    sites_tanks <- sites_tanks_for_depot_subset(tank_info_subset, telemetry_data$sites)
+
+    ## If we didn't find a matching site for our depot number it will be an empty list
+    if (length(sites_tanks) > 0) {
+        return(sites_tanks)
+    } else {
+        return(NULL)
+    }
+}
+
+
+## cust_dps_from_tank_info_subset <- function(df)
+## {
+##     #' dp_nums is a nested list ordered : depot_number
+##     #'                                        ▼
+##     #'                                    sitename
+##     #'                                        ▼
+##     #'                                      tank
+
+##     dp_nums = list()
+
+##     for (i in 1:nrow(df)) {
+##         depot_number <- as.character(split_erp_codes(df[i, "Storage ERPCode"]))
+##         sitename <- as.character(df[i, "TelemetrySitename"])
+##         tank <- df[i, "TelemetryLevelVariable"]
+
+##         ## Append the tank if sitename is already in our list
+##         if (sitename %in% names(dp_nums[[depot_number]])) {
+##             dp_nums[[depot_number]][[sitename]] <- c(dp_nums[[depot_number]][[sitename]], tank)
+##         } else {
+##             ## Create a new site and append the whole list
+##             new_site <- list()
+##             new_site[[sitename]] <- tank
+##             dp_nums[[depot_number]] <- c(dp_nums[[depot_number]], new_site)
+##         }
+##     }
+##     return(dp_nums)
+## }
+
+
+split_erp_codes <- function(x)
+{
+    split <- strsplit(as.character(x), "_")
     return(split[[1]][1])
 }
 
 
-MatchedDelTel <- function(del, tel, del_dp, tanks_dp) {
+MatchedDelTel <- function(del, tel, depot_number, tanks_dp)
+{
     #' Here tel variable is the deliveries calculated from the telemetry
 
-    match_df <- match_time_series(del, tel)
+    match_df <- match_time_series(del, tel, time_window = 24)
     cor_match <- cor_matched_time_series(match_df)
     best_start <- best_start_matching(match_df)
     best_end <- best_end_matching(match_df)
@@ -475,7 +536,7 @@ MatchedDelTel <- function(del, tel, del_dp, tanks_dp) {
             start = best_start,
             end = best_end,
             length = best_end - best_start,
-            dp = del_dp,
+            dp = depot_number,
             tanks = tanks_dp
         ),
         class = "MatchedDelTel"
@@ -483,87 +544,49 @@ MatchedDelTel <- function(del, tel, del_dp, tanks_dp) {
 }
 
 
-match_deliveries_tanks <- function(deliveries, tanks, dp_nums) {
-    ## Two cases to work with 1 del DP -> 1 tank, 1 del DP -> multiple tanks
+match_deliverie_tanks <- function(delivery, tanks, depot_number)
+{
+    # Two cases to work with 1 del DP -> 1 tank, 1 del DP -> multiple tanks
+    actual_del <- delivery_ts(delivery)
 
-    f <- function(del_dp, tanks_dp) {
-        actual_del <- delivery_ts(delivery_for_dp(del_dp, deliveries))
-        if (length(tanks_dp) == 1) {
-            ## Case: 1 del -> 1 tank
-            tel_del <- deliveries_from_telemetry(tank_for_id(tanks_dp, tanks)$telemetry)
-        } else {
-            ## Case: 1 del -> multiple tanks
-            ## We need to merge the telemetry deliveries from both tanks
-            ## To do so we merge the raw telemetry from both tanks
-            f2 <- pryr::partial(tank_for_id, tanks=tanks)
-            tel_list <- lapply(tanks_dp, . %>% .$telemetry %o% f2)
-            merged_tel <- aggregate(. ~ datetime, data.table::rbindlist(tel_list), sum)
-            tel_del <- deliveries_from_telemetry(merged_tel)
-        }
-        if (is.null(tel_del)) {
-            return(NULL)
-        } else {
-            return(MatchedDelTel(actual_del, tel_del, del_dp, tanks_dp))
-        }
+    if (length(tanks) == 1) {
+        ## Case: 1 del -> 1 tank
+        tel_del <- deliveries_from_telemetry(tanks[[1]]$telemetry.serie)
+    } else {
+        ## Case: 1 del -> multiple tanks
+        ## We need to merge the telemetry deliveries from both tanks
+        ## To do so we merge the raw telemetry from both tanks
+        tel_list <- lapply(tanks, . %>% .$telemetry.serie)
+        merged_tel <- aggregate(. ~ datetime, data.table::rbindlist(tel_list), sum)
+        tel_del <- deliveries_from_telemetry(merged_tel)
     }
-    return(mapply(f, del_dp=names(dp_nums), tanks_dp=dp_nums, SIMPLIFY = FALSE, USE.NAMES = FALSE))
-}
 
+    tanks_dp <- lapply(tanks, . %>% .$id)
 
-delivery_for_tank <- function(tank, client) {
-    for (delivery in client$delivery) {
-        if (tank$id %in% delivery$tanks) {
-            return(delivery)
-        }
+    if (is.null(tel_del)) {
+        return(NULL)
+    } else {
+        return(MatchedDelTel(actual_del, tel_del, depot_number, tanks_dp))
     }
 }
 
 
-delivery_for_dp <- function(dp, deliveries) {
-    for(delivery in deliveries) {
-        if (dp == delivery$DPNumber) {
-            return(delivery)
-        }
-    }
+delivery_ts <- function(delivery)
+{
+    return(plyr::arrange(delivery$df[,c('ShiftRealStartDateTime',
+                                        'DeliveredQuantity')], ShiftRealStartDateTime))
 }
 
 
-tank_for_id <- function(id, tanks) {
-    for (tank in tanks) {
-        if (id == tank$id) {
-            return(tank)
-        }
-    }
-}
+client_consumption_ts <- function(client)
+{
+    #' How we decide to get the final consumption timeseries for a client
+    #' If the client has multiple tanks, they are merged together.
 
-
-tanks_for_delivery <- function(delivery, client) {
-    del_dp <- delivery$DPNumber
-    dp_nums <- client$dp_nums
-    tanks <- dp_nums[names(dp_nums)==del_dp]
-
-    f <- function(tank) {
-        if (tank$id %in% tanks) {
-            return(tank)
-        } else {
-            return(NULL)
-        }
-    }
-
-    res <- lapply(client$tank, f) %>%
-        plyr::compact()
-
-    return(res)
-}
-
-
-delivery_ts <- function(delivery) {
-    return(delivery$df[,c('ShiftRealStartDateTime', 'DeliveredQuantity')])
-}
-
-
-cvd_dp_nums <- function(cvd) {
-     return(lapply(cvd, . %>% .$dp_nums))
+    consumption_ts_list <- lapply(client$tank, . %>% .$consumption.serie)
+    merged_consumption_ts <- aggregate(. ~ date, data.table::rbindlist(consumption_ts_list), sum)
+    time_series <- xts(merged_consumption_ts$value, merged_consumption_ts$date)
+    return(time_series)
 }
 
 
@@ -572,7 +595,8 @@ if (FALSE) {  # Prevents it from running when sourcing the file
     #' Data Analysis
 
     #' Are addreses the same for each tank that a client may have
-    test_tank_address <- function(sitename, tank_info) {
+    test_tank_address <- function(sitename, tank_info)
+    {
         tank_info_client <- subset(tank_info, TelemetrySitename == sitename)
         address <- unique(tank_info_client[, "Address Line1"])
         if (length(address) > 1) {
@@ -588,4 +612,33 @@ if (FALSE) {  # Prevents it from running when sourcing the file
 
     ## These addresses need to be to be manually set
     subset(tank_info, TelemetrySitename == "TRIQUIN2_TX")
+
+    ## Test for depot_numbers with multisites
+    f <- pryr::partial(sites_tanks_for_depot_number,
+                       telemetry_data = telemetry_data,
+                       delivery_data = delivery_data,
+                       tank_info = tank_info)
+
+    client_data <- lapply_pb(depot_numbers, f) %>%
+        plyr::compact()  #Remove NULL entries in the client_data list
+
+    multisites <- lapply(client_data, function(x) if (length(x) > 1) x) %>% compact
+
+    multitank <- lapply(client_data, function(x) if (length(x[[1]]) > 1) x) %>% compact
+
+    get_address_site <- function(x, tank_info)
+    {
+
+        f <- function(y) {
+            tank_info_site <- tank_info[TelemetrySitename==y]
+            state <- tank_info_site[1, "State"]
+            city <- tank_info_site[1, "City"]
+            zip <- tank_info_site[1, "Zip"]
+            address <- paste(state, city, zip)
+            return(address)
+        }
+        return(length(unique(lapply(names(x), f))))
+    }
+
+    lapply(multisites, partial(get_sites, tank_info=tank_info))
 }
