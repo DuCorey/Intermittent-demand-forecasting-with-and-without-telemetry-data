@@ -5,7 +5,7 @@ library(pryr)
 "%o%" <- pryr::compose
 
 
-deliveries_from_telemetry <- function(telemetry, threshold = 10) {
+deliveries_from_telemetry <- function(telemetry, threshold = 10, max_ratio = NULL) {
     #' loop that looks over all the telemetry and find sequences of positive amounts
     #' Initialize the looping variables
     telemetry %<>% as.data.frame  # Indexing is faster as a data.frame
@@ -48,6 +48,14 @@ deliveries_from_telemetry <- function(telemetry, threshold = 10) {
         res <- data.frame(Date=as.POSIXct.numeric(date, origin = '1970-01-01 00:00:00'),
                           Amount=amount) %>%
             plyr::arrange(., Date)
+
+        if (!is.null(max_ratio)) {
+            ## Max ratio is used to filter out deliveries by comparing it to the
+            ## maximum delivery in the serie
+            min_del <- max(res$Amount) * max_ratio
+            res <- res[res$Amount > min_del,]
+        }
+        rownames(res) <- NULL
         return(res)
     }
 }

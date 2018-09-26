@@ -1,8 +1,6 @@
 #' title: data.R
 #' comments: this file creates the data objects necessary for
 #' author: Corey Ducharme / corey.ducharme@polymtl.ca
-#' input: the excel files which contain the deliveries stored in the report folder
-#' output: a csv which contains the deliveries for all clients for all years
 
 #' Work directory
 setwd("/home/corey/AL/code")
@@ -17,7 +15,7 @@ library(readxl)
 library(data.table)
 library(lubridate)
 library(xts)
-
+library(imputeTS)
 
 #' functions
 source("utils.R")
@@ -48,6 +46,7 @@ DeliveryData <- function()
     files <- do.call(c, lapply(sources, f))
 
     merged_data <-
+        ## Don't use rbindlist it will cause errors later when converting the dates
         do.call(rbind,
                 lapply(files, fix_raw_delivery_column_names %o% read_csv_skip_second_line)) %>%
         tidyr::drop_na(., X, DPNumber) %>%
@@ -65,12 +64,15 @@ DeliveryData <- function()
     merged_data$ShiftRealStartDateTime %<>% as.POSIXct(., tz = "America/New_York")
     merged_data$ConfirmationDate       %<>% as.POSIXct(., tz = "America/New_York")
 
-    ## Clean data
-    ## TODO
     ## Speed up subsetting using data.table
     merged_data %<>% data.table::as.data.table() %>%
         ## Remove rows with 0 delivered quantity
-        .[DeliveredQuantity > 0]
+        .[DeliveredQuantity > 0] %>%
+        ## Remove rows without ShiftRealStartDateTime
+        tidyr::drop_na(., ShiftRealStartDateTime)
+
+    ## Remove low delivery amounts for a product
+    merged_data %<>% .[!(RawProduct %in% c("LO2", "LAR", "LN2") & DeliveredQuantity <= 8000)]
 
 
     # Determine unique client depot numbers
@@ -81,7 +83,7 @@ DeliveryData <- function()
         list(
             sources = sources,
             files = files,
-            data = data.table::as.data.table(merged_data),
+            data = merged_data,
             DPNumbers = dps
         ),
         class="DeliveryData"
@@ -231,19 +233,25 @@ Tank <- function(tank, tank_info_sub_tank, telemetry_subset, sitename)
     rtu <- telemetry_subset[1, "RTUTYPE"]
 
 
-    ## The time series
-    consumption_serie <- convert_to_daily_consumption(telemetry_subset)
+    ## Telemetry time serie
     telemetry_serie <- telemetry_subset[, c("DATETIME", "CUSTOMERVALUE")] %>%
-        plyr::arrange(., DATETIME)
-    colnames(telemetry_serie) <- c("datetime", "level")
-    rownames(telemetry_serie) <- NULL
+        plyr::arrange(., DATETIME) %>%
+        dplyr::distinct(., DATETIME, .keep_all = TRUE) %>%
+        plyr::rename(., c("DATETIME"="datetime", "CUSTOMERVALUE"="level")) %>%
+        remove_fluctuations %>%
+        add_missing_hours %>%
+        best_subsequence(., consec = 24)
+    telemetry_serie[[2]] %<>% imputeTS::na.interpolation()
+    telemetry_serie %<>% drop_non_rounded_hours
+
+    ## Daily consumption time serie
+    consumption_serie <- daily_consumption_from_telemetry_serie(telemetry_serie)
 
 
     structure(
         list(
             id = as.character(tank),
             sitename = sitename,
-            unit = as.character(unit),
             product = as.character(product),
             max.level = as.numeric(max_level),
             max.level.unit = as.character(max_level_unit),
@@ -263,19 +271,106 @@ Tank <- function(tank, tank_info_sub_tank, telemetry_subset, sitename)
 }
 
 
-convert_to_daily_consumption <- function(df)
+remove_fluctuations <- function(serie)
 {
-    ## Currently the first day may not be complete.
-    ## Impact should be minor though.
+    #' Remove fluctuations in telemetry data
+    level <- serie[[2]]
+    right <- 2*abs(diff(level, lag = 2))
+    foo <- abs(diff(level[1:length(level)], lag = 1))
+    left <- head(foo, -1) + tail(foo, -1)
+    serie[[2]][which(left>right) + 1] <- NA
+    return(serie)
+}
 
-    df$first_difference <- c(0, diff(df$CUSTOMERVALUE))
 
-    ## We ignore the timezones in the date creation
-    df$date <- as.Date(df$DATETIME)
-    consumption <- aggregate(first_difference ~ date, df,
-                             FUN = function(x) -sum(x[which(x<0)]))
-    colnames(consumption) <- c("date", "value")
-    return(consumption)
+add_missing_hours <- function(serie)
+{
+    #' Add missing hours to serie
+    start <- round(serie[[1]][[1]], units = "hours")
+    end <- round(serie[[1]][[nrow(serie)]], units = "hours")
+    hours <- data.frame(datetime=seq(start, end, by = "hours"))
+    serie <- merge(serie, hours, by=c("datetime"), all = TRUE)
+    return(serie)
+}
+
+serie <- telemetry_serie
+
+best_subsequence <- function(serie, consec)
+{
+    #' Find longuest continuous subset that does not have more than x consecutive
+    #' missing values
+
+    ## Change NA values with a number we know isn't in the data
+    unique_value <- max(serie[[2]], na.rm = TRUE) + 1
+    serie[[2]][is.na(serie[[2]])] <- unique_value
+
+    ## Convert the serie to a run lenght encoding (rle).
+    ## We will use the properties of rle to more easily find the longuest subsequence.
+    ## Also using rle directly avoid us having to use slower looping algorithms.
+    ## (slower in R that is).
+    ## Replacing Nas with a unique value is necessary since NA are treated as
+    ## unique values in the rle.
+    final_rle <- rle(serie[[2]])
+
+    ## Find values in the rle encoding which are longuer than our consecutive limit
+    foo <- which(final_rle$lengths > consec & final_rle$values == unique_value)
+
+    ## Convert our unique_values back to NA
+    serie[[2]][serie[[2]] == unique_value] <- NA
+
+    if (length(foo) == 0L) {
+        ## we didn't find any values longuer than our consecutive limit
+        return(serie)
+    } else {
+        ## For each of the points we found we iterate to find the length of that subset
+        ## Add beginning and end to the iteration
+        split_points <- c(0, foo, length(final_rle$lengths)+1)
+        split_res <- vector("list", (length(split_points)-1))
+        for (i in seq(1, (length(split_points)-1))) {
+            a <- split_points[i]+1
+            b <- split_points[i+1]-1
+            res <- sum(final_rle$lengths[a:b])
+            split_res[[i]] <- list(a=a, b=b, length=res)
+        }
+        c <- which.max(lapply(split_res, . %>% .$length))
+
+        ## Converting the rle indexes into our original series
+        start <- sum(final_rle$lengths[1:split_res[[c]]$a])
+        end   <- sum(final_rle$lengths[1:split_res[[c]]$b])
+        final_serie <- serie[start:end,]
+
+        return(final_serie)
+    }
+}
+
+
+drop_non_rounded_hours <- function(serie)
+{
+    #' Remove non rounded hours
+    res <- serie[,datetime:=as.POSIXct(round(datetime, units = "hours"))] %>%
+        dplyr::distinct(.data = serie, datetime, .keep_all = TRUE)
+    return(res)
+}
+
+
+daily_consumption_from_telemetry_serie <- function(serie)
+{
+    serie$first_difference <- c(0, diff(serie[[2]]))
+
+    ## Positive values in the first difference are both fluctuations or deliveries
+    ## We fix these values by imputing around the mean of consumption around that point
+    serie$first_difference[serie$first_difference > 0] <- NA
+    serie$first_difference %<>% imputeTS::na.ma(., k = 2, weighting = "simple")
+
+    ## Aggregation into daily bins
+    serie %<>% as.data.frame
+    res <- aggregate(serie["first_difference"],
+                     format(serie["datetime"], "%Y-%m-%d"),
+                     function(x) -sum(x))
+    res$datetime <- as.Date.character(res$datetime)
+    colnames(res) <- c("datetime", "value")
+
+    return(res)
 }
 
 
@@ -551,14 +646,15 @@ match_deliverie_tanks <- function(delivery, tanks, depot_number)
 
     if (length(tanks) == 1) {
         ## Case: 1 del -> 1 tank
-        tel_del <- deliveries_from_telemetry(tanks[[1]]$telemetry.serie)
+        tel_del <- deliveries_from_telemetry(tanks[[1]]$telemetry.serie,
+                                             threshold = 0, max_ratio = 1/6)
     } else {
         ## Case: 1 del -> multiple tanks
         ## We need to merge the telemetry deliveries from both tanks
         ## To do so we merge the raw telemetry from both tanks
         tel_list <- lapply(tanks, . %>% .$telemetry.serie)
         merged_tel <- aggregate(. ~ datetime, data.table::rbindlist(tel_list), sum)
-        tel_del <- deliveries_from_telemetry(merged_tel)
+        tel_del <- deliveries_from_telemetry(merged_tel, threshold = 0, max_ratio = 1/6)
     }
 
     tanks_dp <- lapply(tanks, . %>% .$id)
@@ -578,15 +674,152 @@ delivery_ts <- function(delivery)
 }
 
 
+client_delivery_xts <- function(client)
+{
+    #' How we decide to get the final delivery timeseries for a client.
+    #' We convert the hourly deliveries into daily bins
+    ts <- as.data.frame(delivery_ts(client$delivery))
+    res <- aggregate(ts["DeliveredQuantity"],
+                     format(ts["ShiftRealStartDateTime"], "%Y-%m-%d"),
+                     sum) %>%
+        xts(x = .$DeliveredQuantity,
+            order.by = as.Date(as.character(.$ShiftRealStartDateTime)))
+    return(res)
+}
+
+
 client_consumption_ts <- function(client)
+{
+    consumption_ts_list <- lapply(client$tank, . %>% .$consumption.serie)
+    return(as.data.frame(data.table::rbindlist(consumption_ts_list)))
+}
+
+
+client_consumption_xts <- function(client)
 {
     #' How we decide to get the final consumption timeseries for a client
     #' If the client has multiple tanks, they are merged together.
-
-    consumption_ts_list <- lapply(client$tank, . %>% .$consumption.serie)
-    merged_consumption_ts <- aggregate(. ~ date, data.table::rbindlist(consumption_ts_list), sum)
+    ts <- client_consumption_ts(client)
+    merged_consumption_ts <- aggregate(. ~ date, ts, sum)
     time_series <- xts(merged_consumption_ts$value, merged_consumption_ts$date)
     return(time_series)
+}
+
+
+#' Fetching function
+fetch_serie_time <- function(client, serie = c('tel', 'del', 'con'), start, end)
+{
+    if (serie == 'tel') {
+        return(subset(client$tank[[1]]$telemetry.serie, datetime <= end & datetime >= start))
+    } else if (serie == 'del') {
+        return(subset(client$delivery$df, ShiftRealStartDateTime <= end & ShiftRealStartDateTime >= start)[,c("ShiftRealStartDateTime", "DeliveredQuantity")])
+    } else if (serie == 'con') {
+        return(subset(client$tank[[1]]$consumption.serie, date <= end & date > start))
+    }
+}
+
+
+get_client_product <- function(client)
+{
+    return(client$tank[[1]]$product)
+}
+
+
+filter_product <- function(l, products)
+{
+    is.product <- function(client, products)
+    {
+        #' Return True if the client's product is the product
+        if (get_client_product(client) %in% products) {
+            return(TRUE)
+        } else {
+            return(FALSE)
+        }
+    }
+    return(Filter(pryr::partial(is.product, products = products), l))
+}
+
+
+get_client_tank_unit <- function(client)
+{
+    return(client$tank[[1]]$unit)
+}
+
+
+filter_tank_unit <- function(l, units)
+{
+    is.unit <- function(client, units)
+    {
+        #' Return True if the client's product is the product
+        if (get_client_tank_unit(client) %in% units) {
+            return(TRUE)
+        } else {
+            return(FALSE)
+        }
+    }
+    return(Filter(pryr::partial(is.unit, units = units), l))
+}
+
+
+fetch_small_amounts <- function(client, serie = c('con', 'del'), amount)
+{
+    if (serie == 'del') {
+        return(subset(client$matched$df, DeliveredQuantity <= amount)[,c(1,2,3,4)])
+    } else if (serie == 'con') {
+        return(subset(client$matched$df, Amount <= amount)[,c(1,2,3,4)])
+    }
+}
+
+
+min_matched_amount <- function(client, serie = c('con', 'del'))
+{
+    df <- client$match$df[complete.cases(client$match$df),]
+    if (serie == 'con') {
+        return(min(df$Amount))
+    } else if (serie == 'del') {
+        return(min(df$DeliveredQuantity))
+    }
+}
+
+
+filter_cvd <- function(cvd)
+{
+    res <- Filter(function(x) !is.null(x$matched), cvd) %>%
+        filter_product(., c("LN2", "LO2", "LAR")) %>%
+        Filter(function(x) !is.na(x$matched$ratio), .) %>%
+        filter_tank_unit(., c("inH2O"))
+    return(res)
+}
+
+
+get_client_matching_ratio <- function(client)
+{
+    return(client$matched$ratio)
+}
+
+
+get_client_matching_length <- function(client)
+{
+    return(client$matched$length)
+}
+
+
+convert_ts_weekly <- function(serie)
+{
+    #' Convert time series into weeks
+    res <- as.xts(serie[[2]], order.by = as.Date(serie[[1]])) %>%
+        xts::apply.weekly(., sum)
+    attr(res, 'frequency') <- 7
+    return(res)
+}
+
+
+trim_ts <- function(serie, n)
+{
+    #' Remove the n starting and ending values in a time series object
+    first <- serie[-c(1:n),]
+    second <- first[-c((length(first)-(n-1)):length(first)),]
+    return(second)
 }
 
 
