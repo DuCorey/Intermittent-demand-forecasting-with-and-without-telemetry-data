@@ -2,9 +2,6 @@
 #' comments: this file creates the data objects necessary for
 #' author: Corey Ducharme / corey.ducharme@polymtl.ca
 
-#' Work directory
-setwd("/home/corey/AL/code")
-
 #' packages
 library(plyr) # load plyr before dplyr
 library(dplyr)
@@ -293,7 +290,18 @@ add_missing_hours <- function(serie)
     return(serie)
 }
 
-serie <- telemetry_serie
+
+add_missing_days <- function(serie)
+{
+    #' Add missing days to serie
+    start <- round(serie[[1]][[1]], units = "days")
+    end <- round(serie[[1]][[nrow(serie)]], units = "days")
+    days <- data.frame(datetime=seq(start, end, by = "days"))
+    serie <- merge(serie, days, by=c("datetime"), all = TRUE) %>%
+        imputeTS::na.replace(., fill = 0)
+    return(serie)
+}
+
 
 best_subsequence <- function(serie, consec)
 {
@@ -674,48 +682,64 @@ delivery_ts <- function(delivery)
 }
 
 
-client_delivery_xts <- function(client)
+client_delivery_ts <- function(client, source = c("raw", "tel"))
 {
-    #' How we decide to get the final delivery timeseries for a client.
-    #' We convert the hourly deliveries into daily bins
-    ts <- as.data.frame(delivery_ts(client$delivery))
-    res <- aggregate(ts["DeliveredQuantity"],
-                     format(ts["ShiftRealStartDateTime"], "%Y-%m-%d"),
-                     sum) %>%
-        xts(x = .$DeliveredQuantity,
-            order.by = as.Date(as.character(.$ShiftRealStartDateTime)))
-    return(res)
+    source <- match.arg(source)
+    switch(source,
+           raw = {
+               serie <- as.data.frame(delivery_ts(client$delivery))
+           }, tel = {
+               serie <- client$matched$df[,1:2] %>%
+                   tidyr::drop_na()
+           })
+
+    colnames(serie) <- c("datetime", "delivered")
+    rownames(serie) <- NULL
+    return(serie)
 }
+
+
+## client_delivery_xts <- function(client)
+## {
+##     #' How we decide to get the final delivery timeseries for a client.
+##     #' We convert the hourly deliveries into daily bins
+##     ts <- client_delivery_ts(client)
+##     res <- aggregate(ts["DeliveredQuantity"],
+##                      format(ts["ShiftRealStartDateTime"], "%Y-%m-%d"),
+##                      sum) %>%
+##         xts(x = .$DeliveredQuantity,
+##             order.by = as.Date(as.character(.$ShiftRealStartDateTime)))
+##     return(res)
+## }
 
 
 client_consumption_ts <- function(client)
 {
+    #' If the client has multiple tanks they are merged together
     consumption_ts_list <- lapply(client$tank, . %>% .$consumption.serie)
-    return(as.data.frame(data.table::rbindlist(consumption_ts_list)))
+    merged <- as.data.frame(data.table::rbindlist(consumption_ts_list))
+    return(merged)
 }
 
 
-client_consumption_xts <- function(client)
-{
-    #' How we decide to get the final consumption timeseries for a client
-    #' If the client has multiple tanks, they are merged together.
-    ts <- client_consumption_ts(client)
-    merged_consumption_ts <- aggregate(. ~ date, ts, sum)
-    time_series <- xts(merged_consumption_ts$value, merged_consumption_ts$date)
-    return(time_series)
-}
+## client_consumption_xts <- function(client)
+## {
+##     #' How we decide to get the final consumption timeseries for a client
+##     ts <- client_consumption_ts(client)
+##     merged_consumption_ts <- aggregate(. ~ date, ts, sum)
+##     time_series <- xts(merged_consumption_ts$value, merged_consumption_ts$date)
+##     return(time_series)
+## }
 
 
 #' Fetching function
-fetch_serie_time <- function(client, serie = c('tel', 'del', 'con'), start, end)
+fetch_serie_time <- function(client, serie = c("tel", "del", "con"), start, end)
 {
-    if (serie == 'tel') {
-        return(subset(client$tank[[1]]$telemetry.serie, datetime <= end & datetime >= start))
-    } else if (serie == 'del') {
-        return(subset(client$delivery$df, ShiftRealStartDateTime <= end & ShiftRealStartDateTime >= start)[,c("ShiftRealStartDateTime", "DeliveredQuantity")])
-    } else if (serie == 'con') {
-        return(subset(client$tank[[1]]$consumption.serie, date <= end & date > start))
-    }
+    serie <- match.arg(serie)
+    switch(serie,
+           tel = subset(client$tank[[1]]$telemetry.serie, datetime <= end & datetime >= start),
+           del = subset(client$delivery$df, ShiftRealStartDateTime <= end & ShiftRealStartDateTime >= start)[,c("ShiftRealStartDateTime", "DeliveredQuantity")],
+           con = subset(client$tank[[1]]$consumption.serie, date <= end & date > start))
 }
 
 
@@ -761,24 +785,22 @@ filter_tank_unit <- function(l, units)
 }
 
 
-fetch_small_amounts <- function(client, serie = c('con', 'del'), amount)
+fetch_small_amounts <- function(client, serie = c("con", "del"), amount)
 {
-    if (serie == 'del') {
-        return(subset(client$matched$df, DeliveredQuantity <= amount)[,c(1,2,3,4)])
-    } else if (serie == 'con') {
-        return(subset(client$matched$df, Amount <= amount)[,c(1,2,3,4)])
-    }
+    serie <- match.arg(serie)
+    switch(serie,
+           del = subset(client$matched$df, DeliveredQuantity <= amount)[,c(1,2,3,4)],
+           con = subset(client$matched$df, Amount <= amount)[,c(1,2,3,4)])
 }
 
 
-min_matched_amount <- function(client, serie = c('con', 'del'))
+min_matched_amount <- function(client, serie = c("con", "del"))
 {
+    serie <- match.arg(serie)
     df <- client$match$df[complete.cases(client$match$df),]
-    if (serie == 'con') {
-        return(min(df$Amount))
-    } else if (serie == 'del') {
-        return(min(df$DeliveredQuantity))
-    }
+    switch(serie,
+           del = min(df$Amount),
+           con = min(df$DeliveredQuantity))
 }
 
 
