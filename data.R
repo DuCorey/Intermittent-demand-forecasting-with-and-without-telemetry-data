@@ -20,6 +20,10 @@ source("matching.R")
 
 "%o%" <- pryr::compose
 
+#' blacklist DPs that have very odd problems that simply aren't worth the time
+#' to fix
+blacklist <- c("70835")
+
 read_csv_skip_second_line <- function(file)
 {
     data <- read.csv(file, header = TRUE, stringsAsFactors = FALSE)
@@ -507,7 +511,10 @@ client_view_data <- function(sample_number = NULL)
     ## If we cannot match a sitename, then we return NULL.
     depot_numbers <- unique(tank_info[['DPNumber']]) %>%
         ## Remove the depot numbers not in the delivery data
-        intersect(., delivery_data$DPNumbers)
+        intersect(., delivery_data$DPNumbers) %>%
+        ## Remove depot_numbers in the blacklist
+        setdiff(., blacklist)
+
 
     f <- pryr::partial(client_data_for_depot_number,
                        telemetry_data = telemetry_data,
