@@ -697,7 +697,8 @@ client_delivery_ts <- function(client, source = c("raw", "tel"))
                serie <- as.data.frame(delivery_ts(client$delivery))
            }, tel = {
                serie <- client$matched$df[,1:2] %>%
-                   tidyr::drop_na()
+                   tidyr::drop_na() %>%
+                   convert_pressure_to_delivery(., client)
            })
 
     colnames(serie) <- c("datetime", "delivered")
@@ -833,6 +834,15 @@ get_client_matching_length <- function(client)
 }
 
 
+convert_pressure_to_delivery <- function(serie, client)
+{
+    model <- lm(DeliveredQuantity ~ Amount, data = client$matched$df, na.action = na.exclude)
+    serie$Amount <- round(predict(model, serie))
+
+    return(serie)
+}
+
+
 convert_ts_weekly <- function(serie)
 {
     #' Convert time series into weeks
@@ -843,12 +853,20 @@ convert_ts_weekly <- function(serie)
 }
 
 
-trim_ts <- function(serie, n)
+trim_ts <- function(serie, n, how = "both")
 {
-    #' Remove the n starting and ending values in a time series object
-    first <- serie[-c(1:n),]
-    second <- first[-c((length(first)-(n-1)):length(first)),]
-    return(second)
+    #' Remove n values in a time series object.
+    #' Series can be trimed from the start, the end and both.
+
+    how  <- match.arg(how, c("both", "start", "end"))
+
+    if (how %in% c("start", "both")) {
+        serie <- serie[-c(1:n),]
+    }
+    if (how %in% c("end", "both")) {
+        serie <- serie[-c((length(serie)-(n-1)):length(serie)),]
+    }
+    return(serie)
 }
 
 
