@@ -698,8 +698,7 @@ client_delivery_ts <- function(client, source = c("raw", "tel"))
                serie <- as.data.frame(delivery_ts(client$delivery))
            }, tel = {
                serie <- client$matched$df[,1:2] %>%
-                   tidyr::drop_na() %>%
-                   convert_pressure_to_delivery(., client)
+                   tidyr::drop_na()
            })
 
     colnames(serie) <- c("datetime", "delivered")
