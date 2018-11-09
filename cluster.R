@@ -10,7 +10,6 @@ library(dtwclust)
 library(xts)
 
 source("data.R")
-source("smooth.R")
 
 #' parallel if required
 ## Create parallel workers
@@ -23,30 +22,13 @@ source("smooth.R")
 #' functions
 z_score <- function(ts)
 {
-    if (is.null(ts)) {
-        warning("Null value passed returning NULL.")
-        return(NULL)
-    } else {
-        return((ts - mean(ts))/sd(ts))
-    }
-}
-
-
-un_z_score <- function(ts, mean, sd)
-{
-    return(ts*sd + mean)
+    return((ts - mean(ts))/sd(ts))
 }
 
 
 normalize <- function(ts)
 {
     return((ts-min(ts))/(max(ts)-min(ts)))
-}
-
-
-unnormalize <- function(ts, max, min)
-{
-    return(ts*(max-min)+min)
 }
 
 
@@ -100,7 +82,8 @@ client_cluster_con_serie <- function(client, time_scale)
         serie <- convert_xts_monthly(serie)
     })
 
-    serie %<>% trim_ts(., n = 1)
+    serie %<>% trim_ts(., n = 1) %>%
+        z_score
     return(serie)
 }
 
@@ -129,6 +112,7 @@ client_cluster_del_serie <- function(client, source, time_scale)
         serie <- convert_xts_monthly(serie)
     })
 
+    ##serie %<>% z_score
     return(serie)
 }
 
@@ -144,10 +128,6 @@ get_del_series <- function(cvd, source, time_scale)
 
 filter_year <- function(serie, time_scale, year = "2016")
 {
-    if (is.null(serie)) {
-        return(NULL)
-    }
-
     time_scale <- match.arg(time_scale, c("weeks", "days", "months"))
 
     #' Filter time series for a specific year
@@ -160,6 +140,21 @@ filter_year <- function(serie, time_scale, year = "2016")
     } else {
         return(NULL)
     }
+}
+
+
+filter_cvd_clustering <- function(cvd, source, time_scale)
+{
+    filt_con <- not %o% is.null %o%
+        pryr::partial(filter_year, time_scale = time_scale) %o%
+        pryr::partial(client_cluster_con_serie, time_scale = time_scale)
+    filt_del <- not %o% is.null %o%
+        pryr::partial(filter_year, time_scale = time_scale) %o%
+        pryr::partial(client_cluster_del_serie, source = source, time_scale = time_scale)
+
+    cvd <- Filter(filt_con, cvd) %>%
+        Filter(filt_del, .)
+    return(cvd)
 }
 
 
@@ -182,36 +177,40 @@ mv_series <- function(cvd, time_scale, source)
 }
 
 
-cluster_data <- function(cvd, source, time_scale) {
-    ## Get the data
-    print("Fetching delivery series")
-    del_orig <- get_del_series(cvd, source = source, time_scale = time_scale)
+get_cluster_del_series <- function(cvd, source, time_scale)
+{
+    series <- get_del_series(cvd, source = source, time_scale = time_scale)
+    res <- lapply(series, filter_year,
+                  time_scale = time_scale)
+    return(res)
+}
 
-    print("Fetching consumption series")
-    con_orig <- get_con_series(cvd, time_scale = time_scale)
 
-    print("Preprocessing delivery data")
-    del <- lapply(del_orig, my_croston) %>%
-        lapply(., z_score) %>%
-        lapply(., filter_year, time_scale = time_scale)
+get_cluster_con_series <- function(cvd, time_scale)
+{
+    series <- get_con_series(cvd, time_scale = time_scale)
+    res <- lapply(series, filter_year,
+                  time_scale = time_scale)
+    return(res)
+}
 
-    print("Preprocessing consumption data")
-    con <- lapply(con_orig, my_ets) %>%
-        lapply(., z_score) %>%
-        lapply(., filter_year, time_scale = time_scale)
+
+prep_data_clus <- function(cvd, source, time_scale)
+{
+    #' Speed up the execution of cluster preparation by merging the filtering
+    #' and the data formatting
+    del <- get_cluster_del_series(cvd, source, time_scale)
+    con <- get_cluster_con_series(cvd, time_scale)
 
     ## Combine the both truth series of not null values for del and con
-    f1 <- not %o% is.null
-    ind <- sapply(del, f1) & sapply(con, f1)
+    f <- not %o% is.null
+    ind <- sapply(del, f) & sapply(con, f)
+
     del <- del[ind]
     con <- con[ind]
     cvd <- cvd[ind]
-    del_orig <- del_orig[ind]
-    con_orig <- con_orig[ind]
 
-    return(list(cvd=cvd,
-                del=list(orig=del_orig, series=del),
-                con=list(orig=con_orig, series=con)))
+    return(list(cvd=cvd, del=del, con=con))
 }
 
 

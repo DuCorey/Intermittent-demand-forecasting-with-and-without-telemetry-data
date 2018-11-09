@@ -17,6 +17,7 @@ library(imputeTS)
 #' functions
 source("utils.R")
 source("matching.R")
+source("convert.R")
 
 "%o%" <- pryr::compose
 
@@ -828,18 +829,21 @@ get_client_matching_ratio <- function(client)
 }
 
 
+get_client_matching_cor <- function(client)
+{
+    return(client$matched$cor)
+}
+
+
 get_client_matching_length <- function(client)
 {
     return(client$matched$length)
 }
 
 
-convert_pressure_to_delivery <- function(serie, client)
+get_client_correlation <- function(client)
 {
-    model <- lm(DeliveredQuantity ~ Amount, data = client$matched$df, na.action = na.exclude)
-    serie$Amount <- round(predict(model, serie))
-
-    return(serie)
+    return(client$matched$cor)
 }
 
 
