@@ -1,11 +1,20 @@
+#' title: matching.R
+#' comments: provides functions for matching together deliveries and telemetry
+#'           data
+#' author: Corey Ducharme / corey.ducharme@polymtl.ca
+
+#' packages
 library(magrittr)
 library(lubridate)
 library(dplyr)
 library(pryr)
-"%o%" <- pryr::compose
 
+#' imports
+source("operators.R")
 
-deliveries_from_telemetry <- function(telemetry, threshold = 10, max_ratio = NULL) {
+#' functions
+deliveries_from_telemetry <- function(telemetry, threshold = 10, max_ratio = NULL)
+{
     #' loop that looks over all the telemetry and find sequences of positive amounts
     #' Initialize the looping variables
     telemetry %<>% as.data.frame  # Indexing is faster as a data.frame
@@ -24,15 +33,15 @@ deliveries_from_telemetry <- function(telemetry, threshold = 10, max_ratio = NUL
                     a <- a + 1
                     break
                 }
-                a <- a + 1  # continuous refill  counter
+                a <- a + 1  # continuous refill counter
             }
 
             ## Appending to vectors is the fastest way in R to store results
             ## from explicit loops.
-            date <- c(date, telemetry[j, 1])
+            date <- c(date, telemetry[j, 1])  # Start date of loop
             amount <- c(amount, sum(telemetry[j:(j + a - 1), "first_difference"]))
 
-            j <- j + a  # Continue the loop but after our continuous refill  counter
+            j <- j + a  # Continue the loop but after our continuous refill counter
         } else {
             j <- j + 1
         }
@@ -61,16 +70,20 @@ deliveries_from_telemetry <- function(telemetry, threshold = 10, max_ratio = NUL
 }
 
 
-is_Date <- function(x) {
+is_Date <- function(x)
+{
     return(inherits(x, 'Date'))
 }
 
-is_POSIXct <- function(x) {
+
+is_POSIXct <- function(x)
+{
     return(inherits(x, 'POSIXct'))
 }
 
 
-match_time_series <- function(a, b, time_window=10) {
+match_time_series <- function(a, b, time_window=10)
+{
     #' Match two time series time index together
     #' Input - (a,b): two dataframes containing the time series
     #'         time_window: the window of time to search around for a match
@@ -166,17 +179,20 @@ match_time_series <- function(a, b, time_window=10) {
 }
 
 
-cor_matched_time_series <- function(df) {
+cor_matched_time_series <- function(df)
+{
     return(cor(df[[2]], df[[4]], use = "pairwise.complete.obs", method = "pearson"))
 }
 
 
-matching_ratio <- function(df) {
+matching_ratio <- function(df)
+{
     return(sum(complete.cases(df))/nrow(df))
 }
 
 
-best_start_matching <- function(df) {
+best_start_matching <- function(df)
+{
     #' Return the best start row index of the matches dataframe.
     #' i.e. return the index of first row that does not have any NA values
     #' starting from the top of dataframe
@@ -190,7 +206,8 @@ best_start_matching <- function(df) {
 }
 
 
-best_end_matching <- function(df) {
+best_end_matching <- function(df)
+{
     #' Return the best end row index of the matches dataframe.
     #' i.e. return the index of the first row that does not have nay NA values
     #' starting from the end of the df.
@@ -204,15 +221,19 @@ best_end_matching <- function(df) {
 }
 
 
+#' main
 if (FALSE) {  # Prevent it from being run when sourcing the file
 
     ## has duplicate and zeros DQ_DAILYHOUN_TX_11168
-
-    client <- sample[[2]]
+    client <- cvd[[2]]
     tank <- client$tank[[1]]
     sample_tel <- tank$telemetry
-    tel_deliveries <- deliveries_from_telemetry(sample_tel, threshold = 20)
-    system.time(deliveries_from_telemetry(sample_tel, threshold = 20))
+    tel_deliveries <- deliveries_from_telemetry(sample_tel, threshold = 10)
+
+    fetch_serie_time(client, "tel", "2015-06-23", "2015-06-24")
+
+    system.time(deliveries_from_telemetry(sample_tel, threshold = 10))
+
     actual_del <- ts_for_delivery(deliveries_for_tank(tank, client))
     match_time_series(tel_deliveries, actual_del, 10)
     system.time(match_time_series(tel_deliveries, actual_del, 10))

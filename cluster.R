@@ -1,91 +1,18 @@
-#' title: data.R
-#' comments: this file creates the data objects necessary for
+#' title: cluster.R
+#' comments: functions for fetching data necessary for clustering
 #' author: Corey Ducharme / corey.ducharme@polymtl.ca
-#' input: the excel files which contain the deliveries stored in the report folder
-#' output: a csv which contains the deliveries for all clients for all years
 
 #' packages
 library(dtw)
 library(dtwclust)
-library(xts)
 
+#' imports
 source("data.R")
 source("smooth.R")
-
-#' parallel if required
-## Create parallel workers
-## library(doParallel)
-## cl <- makeCluster(detectCores() - 1)
-## invisible(clusterEvalQ(cl, library(dtwclust)))
-## registerDoParallel(cl)
-
+source("operators.R")
+source("series.R")
 
 #' functions
-z_score <- function(ts)
-{
-    if (is.null(ts)) {
-        warning("Null value passed returning NULL.")
-        return(NULL)
-    } else {
-        return((ts - mean(ts))/sd(ts))
-    }
-}
-
-
-un_z_score <- function(ts, mean, sd)
-{
-    return(ts*sd + mean)
-}
-
-
-normalize <- function(ts)
-{
-    return((ts-min(ts))/(max(ts)-min(ts)))
-}
-
-
-unnormalize <- function(ts, max, min)
-{
-    return(ts*(max-min)+min)
-}
-
-
-## distance_matrix <- function(data, fun)
-## {
-##     series <- lapply(data, z_transform %o% fun)
-##     ## Since the time series are in days the lag.max is 14
-##     dm <- TSdist::TSDatabaseDistances(series, distance = "dtw", lag.max = 14)
-##     return(dm)
-## }
-
-
-convert_xts_weekly <- function(serie)
-{
-    res <- as.xts(serie[[2]], order.by = as.Date(serie[[1]])) %>%
-        xts::apply.weekly(., sum)
-    attr(res, 'frequency') <- 365.25/7
-    return(res)
-}
-
-
-convert_xts_daily <- function(serie)
-{
-    res <- as.xts(serie[[2]], order.by = as.Date(serie[[1]])) %>%
-        xts::apply.daily(., sum)
-    attr(res, 'frequency') <- c(7, 365.25)
-    return(res)
-}
-
-
-convert_xts_monthly <- function(serie)
-{
-    res <- as.xts(serie[[2]], order.by = as.Date(serie[[1]])) %>%
-        xts::apply.monthly(., sum)
-    attr(res, 'frequency') <- 12
-    return(res)
-}
-
-
 client_cluster_con_serie <- function(client, time_scale)
 {
     time_scale <- match.arg(time_scale, c("days", "weeks", "months"))
@@ -122,11 +49,13 @@ client_cluster_del_serie <- function(client, source, time_scale)
         add_missing_days
 
     switch(time_scale, weeks = {
-        serie <- convert_xts_weekly(serie)
+        serie <- convert_xts_weekly(serie) %>%
+            trim_ts(., n = 1, how = "end")
     }, days = {
         serie <- convert_xts_daily(serie)
     }, months = {
-        serie <- convert_xts_monthly(serie)
+        serie <- convert_xts_monthly(serie) %>%
+            trim_ts(., n = 1, how = "end")
     })
 
     return(serie)
@@ -215,6 +144,49 @@ cluster_data <- function(cvd, source, time_scale) {
 }
 
 
+my_clustering <- function(x, distmat = NULL)
+{
+    dtwclust::tsclust(x,
+                      type = "hierarchical",
+                      k = 5,
+                      distance = "dtw_basic",
+                      trace = TRUE,
+                      control = hierarchical_control(method = "ward.D2",
+                                                     distmat = distmat),
+                      args = tsclust_args(dist = list(window.size = 2,
+                                                      step.pattern = symmetric1)))
+}
+
+
+get_clus_DPs <- function(clus)
+{
+    return(sapply(clus$cvd, function(x) x$DP))
+}
+
+
+filter_clus <- function(clus, set)
+{
+    ind <- get_clus_DPs(clus) %in% set
+
+    clus$cvd %<>% .[ind]
+    clus$con$series %<>% .[ind]
+    clus$con$orig %<>% .[ind]
+    clus$del$series %<>% .[ind]
+    clus$del$orig %<>% .[ind]
+
+    return(clus)
+}
+
+
+## distance_matrix <- function(data, fun)
+## {
+##     series <- lapply(data, z_transform %o% fun)
+##     ## Since the time series are in days the lag.max is 14
+##     dm <- TSdist::TSDatabaseDistances(series, distance = "dtw", lag.max = 14)
+##     return(dm)
+## }
+
+
 #' Playing with dtwclust, hashing and memoization
 ## system.time(x <- serialize(cvd, NULL))
 ## system.time(unserialize(x))
@@ -250,6 +222,7 @@ cluster_data <- function(cvd, source, time_scale) {
 
 ## a <- makeCache()
 
+#' main
 if (FALSE) {  # Prevents it from running when sourcing the file
     #' Testing dtw
     a <- ts(sin(seq(0, 2*pi, length.out = 100)))

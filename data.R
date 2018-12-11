@@ -11,19 +11,19 @@ library(magrittr)
 library(readxl)
 library(data.table)
 library(lubridate)
-library(xts)
+#library(xts)
 library(imputeTS)
 
-#' functions
-source("utils.R")
+#' imports
+source("operators.R")
 source("matching.R")
 source("convert.R")
 
-"%o%" <- pryr::compose
-
-#' blacklist DPs that have very odd problems that simply aren't worth the time
-#' to fix
+#' functions
+## blacklist DPs that have very odd problems that simply aren't worth the time
+## to fix
 blacklist <- c("70835")
+
 
 read_csv_skip_second_line <- function(file)
 {
@@ -31,11 +31,13 @@ read_csv_skip_second_line <- function(file)
     return(data[-1,])
 }
 
+
 fix_raw_delivery_column_names <- function(data)
 {
     colnames(data)[which(names(data) == "ExternalDeliveryNote")] <- "ExtDeliveryNote"
     return(data)
 }
+
 
 ### data objects
 ## Delivery data
@@ -98,10 +100,12 @@ print.DeliveryData <- function(x, ...)
     invisible(x)
 }
 
+
 summary.DeliveryData <- function(x, ...)
 {
     summary(x$data)
 }
+
 
 head.DeliveryData <- function(x, ...)
 {
@@ -203,15 +207,18 @@ TelemetryData <- function()
     )
 }
 
+
 print.TelemetryData <- function(x, ...)
 {
     invisible(x)
 }
 
+
 summary.TelemetryData <- function(x, ...)
 {
     summary(x$data)
 }
+
 
 head.TelemtryData <- function(x, ...)
 {
@@ -846,33 +853,7 @@ get_client_correlation <- function(client)
 }
 
 
-convert_ts_weekly <- function(serie)
-{
-    #' Convert time series into weeks
-    res <- as.xts(serie[[2]], order.by = as.Date(serie[[1]])) %>%
-        xts::apply.weekly(., sum)
-    attr(res, 'frequency') <- 7
-    return(res)
-}
-
-
-trim_ts <- function(serie, n, how = "both")
-{
-    #' Remove n values in a time series object.
-    #' Series can be trimed from the start, the end and both.
-
-    how  <- match.arg(how, c("both", "start", "end"))
-
-    if (how %in% c("start", "both")) {
-        serie <- serie[-c(1:n),]
-    }
-    if (how %in% c("end", "both")) {
-        serie <- serie[-c((length(serie)-(n-1)):length(serie)),]
-    }
-    return(serie)
-}
-
-
+#' main
 if (FALSE) {  # Prevents it from running when sourcing the file
     #' Main
     #' Data Analysis

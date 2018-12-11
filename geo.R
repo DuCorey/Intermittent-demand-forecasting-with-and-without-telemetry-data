@@ -1,16 +1,18 @@
-#' Geolocation functions
+#' title: geo.R
+#' comments: Geolocation functions
+#' author: Corey Ducharme / corey.ducharme@polymtl.ca
+
+#' packages
 library('ggmap')
 library('maps')
 library('mapdata')
 library('ggplot2')
 
-setwd("/home/corey/AL/code")
+#' imports
 
-CVD <- readRDS("../data/master/client.rds")
-
-sample <- readRDS("../data/master/client_sample.rds")
-
-format_zip <- function(zip) {
+#' functions
+format_zip <- function(zip)
+{
     #' The zips are encoded as strings of floating numbers with .0
     #' This removes only gets the digits we want for the zip
     res <- strsplit(zip, "[.]")
@@ -18,12 +20,14 @@ format_zip <- function(zip) {
 }
 
 
-get_address <- function(client) {
+get_address <- function(client)
+{
     client_info <- na.omit(c(client$address, client$city, client$state, format_zip(client$zip)))
     return(paste(client_info, collapse = ", "))
 }
 
-init_latlon <- function(client_list) {
+init_latlon <- function(client_list)
+{
     address <- lapply(client_list, get_address)
 
     f <- pryr::partial(ggmap::geocode, output = "latlon")
@@ -36,7 +40,8 @@ init_latlon <- function(client_list) {
     return(geo_df)
 }
 
-update_latlon <- function(df) {
+update_latlon <- function(df)
+{
     for (ind in which(!complete.cases(df))) {
         address <- as.character(df[ind, 'address'])
         res <- ggmap::geocode(address, output = "latlon")
@@ -46,9 +51,29 @@ update_latlon <- function(df) {
     return(df)
 }
 
-missing_geo <- function(geo_df) {
+
+missing_geo <- function(geo_df)
+{
     return(geo_df[which(!complete.cases(geo_df)),])
 }
+
+
+geo_plot <- function(df)
+{
+    usa <- ggplot2::map_data("usa")
+    ggplot() +
+        geom_polygon(data = usa, aes(x=long, y = lat, group = group)) +
+        geom_point(data = lat_lon, aes(x=lon, y = lat), color = "red", size = 1) +
+        coord_fixed(1.3)
+}
+
+
+#' main
+setwd("/home/corey/AL/code")
+
+CVD <- readRDS("../data/master/client.rds")
+
+sample <- readRDS("../data/master/client_sample.rds")
 
 
 ## sample_geo <- init_latlon(sample)
@@ -60,15 +85,6 @@ cvd_geo <- init_latlon(cvd)
 missing_geo(cvd_geo)
 cvd_geo %<>% update_latlon
 saveRDS(cvd_geo, "../data/master/cvd_geo.rds")
-
-geo_plot <- function(df) {
-    usa <- ggplot2::map_data("usa")
-    ggplot() +
-        geom_polygon(data = usa, aes(x=long, y = lat, group = group)) +
-        geom_point(data = lat_lon, aes(x=lon, y = lat), color = "red", size = 1) +
-        coord_fixed(1.3)
- }
-
 
 ## map <- get_map(location = center, zoom = 4, color = "bw")
 ## map.plot <- ggmap(map)

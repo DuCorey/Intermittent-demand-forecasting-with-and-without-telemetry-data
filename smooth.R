@@ -1,4 +1,40 @@
-library("tsintermittent")
+#' title: smooth.R
+#' comments: smoothing and normalizing functions for different data types
+#' author: Corey Ducharme / corey.ducharme@polymtl.ca
+
+#' packages
+library(tsintermittent)
+
+#' imports
+
+#' functions
+z_score <- function(ts)
+{
+    if (is.null(ts)) {
+        warning("Null value passed returning NULL.")
+        return(NULL)
+    } else {
+        return((ts - mean(ts))/sd(ts))
+    }
+}
+
+
+un_z_score <- function(ts, mean, sd)
+{
+    return(ts*sd + mean)
+}
+
+
+normalize <- function(ts)
+{
+    return((ts-min(ts))/(max(ts)-min(ts)))
+}
+
+
+unnormalize <- function(ts, max, min)
+{
+    return(ts*(max-min)+min)
+}
 
 
 forward_propagation <- function(x)
