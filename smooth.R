@@ -25,15 +25,54 @@ un_z_score <- function(ts, mean, sd)
 }
 
 
-normalize <- function(ts)
+scale <- function(ts)
 {
-    return((ts-min(ts))/(max(ts)-min(ts)))
+    #' Scale the data between 0 and 1
+    if (is.null(ts)) {
+        warning("Null value passed returning NULL.")
+        return(NULL)
+    } else {
+        return((ts-min(ts))/(max(ts)-min(ts)))
+    }
 }
 
 
-unnormalize <- function(ts, max, min)
+unscale <- function(ts, max, min)
 {
     return(ts*(max-min)+min)
+}
+
+
+scale_ab <- function(ts, a, b)
+{
+    if (is.null(ts)) {
+        warning("Null value passed returning NULL.")
+        return(NULL)
+    } else {
+        return(a + (ts - min(ts)) * (b - a) / (max(ts) - min(ts)))
+    }
+}
+
+
+unscale_ab <- function(ts, a, b, max, min)
+{
+    return((ts - a) * (max - min) / (b - a) + min)
+}
+
+
+normalize_relative <- function(x, y)
+{
+    #' Normalize serie x relative to serie y
+    return(x * sum(y)/sum(x))
+}
+
+
+scale_mult <- function(...)
+{
+    #' Scale multiple time series based on the global max and min
+    my_max <- max(c(...))
+    my_min <- min(c(...))
+    return(lapply(list(...), function(x) (x - my_min) / (my_max - my_min)))
 }
 
 
@@ -107,7 +146,7 @@ my_croston <- function(data, ...) {
 
     ## Convert data to numeric since the methods don't like to take xts input
     smoothed <- tsintermittent::crost(as.numeric(data), h = 0, init = "mean",
-                                      init.opt = FALSE, type = "sba", ...)$frc.in
+                                      init.opt = TRUE, type = "sba", ...)$frc.in
 
     ## Refit the time series so the times add match up again.
     ## Croston being an exponential smoothing method will lose a time date

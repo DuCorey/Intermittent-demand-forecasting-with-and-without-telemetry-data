@@ -18,14 +18,15 @@ plot_cluster_series <- function(clus, series)
 }
 
 
-plot_mult_xts <- function(...)
+plot_mult_xts <- function(..., main = NULL, xlab = NULL, ylab = NULL, legend.names = NULL, col = NULL)
 {
     #' Plots multiple xts series together
-    plot(merge(...))
+    plot(merge(...), main = main, xlab = xlab, ylab = ylab)
+    addLegend(legend.names = legend.names, col = col, lty = 1, bty = "o")
 }
 
 
-plot_error_model <- function(mod)
+plot.ErrorModel <- function(mod, main = NULL, xlab = NULL, ylab = NULL, q_opt = TRUE)
 {
     ## Creating the necessary data structures
     agg_level <- seq_along(mod$SMA$error)
@@ -33,18 +34,37 @@ plot_error_model <- function(mod)
     sma_data$size[[mod$SMA$opt]] <- 2  # The size doesn't actually matter since it's relative
     ema_data <- data.frame(y = mod$EMA$error, x = agg_level, size = 1)
     ema_data$size[[mod$EMA$opt]] <- 2
-    annotations <- data.frame(text = c(mod$SMA$opt, mod$EMA$opt),
+
+    annotations <- data.frame(text = c(mod$SMA$opt, mod$EMA$op),
                               x = c(mod$SMA$opt, mod$EMA$opt),
                               y = c(mod$SMA$error[[mod$SMA$opt]], mod$EMA$error[[mod$EMA$opt]]))
 
+
+    if (q_opt) {
+        sma_data$size[[mod$SMA$q_opt]] <- 2
+        ema_data$size[[mod$EMA$q_opt]] <- 2
+        foo <- data.frame(text = c(mod$SMA$q_opt, mod$EMA$q_opt),
+                          x = c(mod$SMA$q_opt, mod$EMA$q_opt),
+                          y = c(mod$SMA$error[[mod$SMA$q_opt]], mod$EMA$error[[mod$EMA$q_opt]]))
+        annotations <- rbind(annotations, foo)
+    }
 
     ggplot(NULL) +
         geom_point(data = sma_data, aes(y = y, x = x, color = "SMA", size = size), show.legend = F) +
         geom_point(data = ema_data, aes(y = y, x = x, color = "EMA", size = size), show.legend = F) +
         geom_line(aes(y = mod$Croston, x = agg_level, color = "Croston"), size = 1.5) +
-        geom_line(aes(y = mod$ASACT, x = agg_level, color = "ASACT"), size = 1.5, linetype = "longdash") +
+        ##geom_line(aes(y = mod$ASACT, x = agg_level, color = "ASACT"), size = 1.5, linetype = "longdash") +
         geom_text(data = annotations, aes(x = x, y = y, label = text)) +
         scale_color_manual(values = cbPalette) +
-        guides(color=guide_legend(title=NULL))
+        guides(color=guide_legend(title=NULL)) +
+        labs(title = main, x = xlab, y = ylab)
+}
 
+
+plot_series_error <- function(error_model, main = NULL, xlab = NULL, ylab = NULL, legend.names = NULL, col = NULL)
+{
+    con <- error_model$con
+    sma <- get_error_model(error_model, "SMA")
+    crost <- get_error_model(error_model, "Croston")
+    plot_mult_xts(con, sma, crost, main = main, xlab = xlab, ylab = ylab, legend.names = legend.names, col = col)
 }
