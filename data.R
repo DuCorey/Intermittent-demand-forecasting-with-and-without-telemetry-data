@@ -90,7 +90,7 @@ DeliveryData <- function()
             data = merged_data,
             DPNumbers = dps
         ),
-        class="DeliveryData"
+        class = "DeliveryData"
     )
 }
 

@@ -120,14 +120,14 @@ cluster_data <- function(cvd, source, time_scale) {
     con_orig <- get_con_series(cvd, time_scale = time_scale)
 
     print("Preprocessing delivery data")
-    del <- lapply(del_orig, my_croston) %>%
-        lapply(., z_score) %>%
-        lapply(., filter_year, time_scale = time_scale)
+    del <- mclapply(del_orig,
+                    pryr::partial(filter_year, time_scale = time_scale) %o% z_score %o% my_croston,
+                    mc.cores = 8)
 
     print("Preprocessing consumption data")
-    con <- lapply(con_orig, my_ets) %>%
-        lapply(., z_score) %>%
-        lapply(., filter_year, time_scale = time_scale)
+    con <- mclapply(con_orig,
+                    pryr::partial(filter_year, time_scale = time_scale) %o% z_score %o% my_ets,
+                    mc.cores = 8)
 
     ## Combine the both truth series of not null values for del and con
     f1 <- not %o% is.null
@@ -138,9 +138,15 @@ cluster_data <- function(cvd, source, time_scale) {
     del_orig <- del_orig[ind]
     con_orig <- con_orig[ind]
 
-    return(list(cvd=cvd,
-                del=list(orig=del_orig, series=del),
-                con=list(orig=con_orig, series=con)))
+    structure(
+        list(
+            cvd = cvd,
+            del = list(orig = del_orig,
+                       smooth = del),
+            con = list(orig = con_orig,
+                       smooth = con)
+        )
+    )
 }
 
 

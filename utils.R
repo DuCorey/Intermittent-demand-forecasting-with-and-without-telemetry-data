@@ -2,11 +2,12 @@
 #' comments: this file contains utility functions for working on the code
 #' author: Corey Ducharme / corey.ducharme@polymtl.ca
 
+
 lapply_pb <- function(X, FUN, ...) {
     env <- environment()
     pb_Total <- length(X)
     counter <- 0
-    pb <- txtProgressBar(min = 0, max = pb_Total, style = 3)   
+    pb <- txtProgressBar(min = 0, max = pb_Total, style = 3)
 
     ## wrapper around FUN
     wrapper <- function(...){

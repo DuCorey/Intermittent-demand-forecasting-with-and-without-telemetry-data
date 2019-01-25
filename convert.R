@@ -1,5 +1,3 @@
-source("data.R")
-
 conver_LAR <- readRDS("../data/master/conver_LAR.rds")
 conver_LO2 <- readRDS("../data/master/conver_LO2.rds")
 conver_LN2 <- readRDS("../data/master/conver_LN2.rds")
