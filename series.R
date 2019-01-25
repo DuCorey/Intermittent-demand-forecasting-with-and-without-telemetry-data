@@ -6,7 +6,6 @@
 library(xts)
 
 #' imports
-source("smooth.R")
 
 #' functions
 convert_xts_weekly <- function(serie)
@@ -76,4 +75,31 @@ trim_ts <- function(serie, n, how = "both")
 merge_xts_list <- function(l)
 {
     return(Reduce(merge, l[2:length(l)], l[[1]]))
+}
+
+
+match_ends <- function(a, b, how)
+{
+    #' Takes two time series and returns them so that both ends match
+    #' It cuts off the extra in the larger time series.
+    how <- match.arg(how, c("start", "end"))
+
+    if (how == "end") {
+        min_end <- min(end(a), end(b))
+        a <- a[xts_range(start(a), min_end)]
+        b <- b[xts_range(start(b), min_end)]
+    } else if (how == "start") {
+        max_start <- max(start(a), start(b))
+        a <- a[xts_range(max_start, end(a))]
+        b <- b[xts_range(max_start, end(b))]
+    }
+
+    return(list(a,b))
+}
+
+
+xts_range <- function(start, end)
+{
+    #' Create an xts range from start and end dates
+    return(paste(start, end, sep = "::"))
 }
