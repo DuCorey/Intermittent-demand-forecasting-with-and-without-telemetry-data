@@ -58,7 +58,7 @@ my_croston <- function(data, ...) {
     ## Croston being an exponential smoothing method will lose a time date
 
     smoothed_xts <- smoothed[!is.na(smoothed)] %>%
-        xts(., order.by = index(data)[-1])
+        xts(., order.by = tail(index(data), -1))
 
     attr(smoothed_xts, 'frequency') <- frequency(data)
 
@@ -107,6 +107,14 @@ ASACT <- function(serie, agg, ...)
 }
 
 
-my_mapa <- function(data, ...) {
+my_mapa <- function(data, agg, ...) {
 
+    smoothed <- mapa(ts(data), ppy = agg, fh = 0, display = 0, conf.lvl=NULL, type = "ets", ...)$infor
+
+    smoothed_xts <- smoothed[!is.na(smoothed)] %>%
+        xts(., order.by = tail(index(data), -agg))
+
+    attr(smoothed_xts, 'frequency') <- frequency(data)
+
+    return(smoothed_xts)
 }
