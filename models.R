@@ -8,8 +8,21 @@
 source("smooth.R")
 source("error.R")
 source("series.R")
+source("ADIDA.R")
 
 #'functions
+opt_model <- function(opt)
+{
+    res <- switch(as.character(opt),
+                  "1" = "ADIDA - SMA",
+                  "2" = "ADIDA - EMA",
+                  "3" = "Croston",
+                  "4" = "ASACT",
+                  "5" = "AGG",
+                  "6" = "MAPA")
+    return(res)
+}
+
 
 all_models <- function(con, del, asact_time, asact_init_serie, max_bin = "auto", error_type = "rmse", norm = FALSE)
 {
@@ -46,16 +59,22 @@ all_models <- function(con, del, asact_time, asact_init_serie, max_bin = "auto",
     foo <- match_ends(con, serie_4, "end")
     serie_4 <- foo[[2]]
 
-    ## Model 5 - Aggregation
-    serie_5 <- my_agg(series_1)
+    ## Model 6 - MAPA
+    #serie_6 <- my_mapa(del, 2)
 
     ## Match the lengths of the series for all the models
     min_length <- min(lengths(series_1), lengths(series_2), length(serie_3),
                       length(serie_4))
 
+    series_1 <- lapply(series_1, function(x) trim_ts(x, length(x) - min_length, "start"))
     series_2 <- lapply(series_2, function(x) trim_ts(x, length(x) - min_length, "start"))
     serie_3 <- trim_ts(serie_3, length(serie_3) - min_length, "start")
     serie_4 <- trim_ts(serie_4, length(serie_4) - min_length, "start")
+    #serie_6 <- trim_ts(serie_6, length(serie_6) - min_length, "start")
+
+    ## Model 5 - Aggregation
+    serie_5 <- series_agg(series_1)
+
     con <- trim_ts(con, length(con) - min_length, "start")
 
     ## Calculate the errors
@@ -63,23 +82,17 @@ all_models <- function(con, del, asact_time, asact_init_serie, max_bin = "auto",
     errors_2 <- sapply(series_2, error_calc, x = con, type = error_type)
     errors_3 <- sapply(serie_3, error_calc, x = con, type = error_type)
     errors_4 <- sapply(serie_4, error_calc, x = con, type = error_type)
+    errors_5 <- sapply(serie_5, error_calc, x = con, type = error_type)
+    #errors_6 <- sapply(serie_6, error_calc, x = con, type = error_type)
 
-    opt <- which.min(c(min(errors_1), min(errors_2), errors_3, errors_4))
-    opt <- switch(as.character(opt),
-                  "1" = "ADIDA - SMA",
-                  "2" = "ADIDA - EMA",
-                  "3" = "Croston",
-                  "4" = "ASACT")
+    opt <- which.min(c(min(errors_1), min(errors_2), errors_3, errors_4, errors_5))
+    opt <- opt_model(opt)
 
     ## We try to find an quasi optimal value. The first value close to the true minimum.
     sma_min <- which(abs(errors_1 - min(errors_1)) < 0.05 * (max(errors_1) - min(errors_1)))[[1]]
     ema_min <- which(abs(errors_2 - min(errors_2)) < 0.05 * (max(errors_2) - min(errors_2)))[[1]]
-    q_opt <- which.min(c(errors_1[[sma_min]], errors_2[[ema_min]], errors_3, errors_4))
-    q_opt <- switch(as.character(q_opt),
-                    "1" = "ADIDA - SMA",
-                    "2" = "ADIDA - EMA",
-                    "3" = "Croston",
-                    "4" = "ASACT")
+    q_opt <- which.min(c(errors_1[[sma_min]], errors_2[[ema_min]], errors_3, errors_4, errors_5))
+    q_opt <- opt_model(q_opt)
 
 
     structure(
@@ -92,9 +105,12 @@ all_models <- function(con, del, asact_time, asact_init_serie, max_bin = "auto",
             ASACT = errors_4,
             asact_time = asact_time,
             asact_init_serie = asact_init_serie,
+            AGG = errors_5,
+#            MAPA = list(error = errors_6, agg)
             opt = opt,
             q_opt = q_opt,
-            error_type = error_type
+            error_type = error_type,
+            max_bin = max_bin
         ),
         class = "ErrorModel"
     )
@@ -103,7 +119,7 @@ all_models <- function(con, del, asact_time, asact_init_serie, max_bin = "auto",
 
 get_error_model <- function(error, model, opt = "opt", agg_level = NULL)
 {
-    model <- match.arg(model, c("ADIDA - SMA", "ADIDA - EMA", "Croston", "ASACT"))
+    model <- match.arg(model, c("ADIDA - SMA", "ADIDA - EMA", "Croston", "ASACT", "AGG", "MAPA"))
     opt <- match.arg(opt, c("opt", "q_opt"))
     del <- error$del
 
@@ -128,6 +144,14 @@ get_error_model <- function(error, model, opt = "opt", agg_level = NULL)
                serie <- ASACT(asact_init_serie, asact_time) %>%
                    normalize_relative(., del)
                err <- error$ASACT
+           }, "AGG" = {
+               bins <- 1:error$max_bin
+               serie <- lapply(bins, function(x) ADIDA(del, x, type = "SMA")) %>%
+                   lapply(., function(x) trim_ts(x, length(x) - length(error$con), "start")) %>%
+                   series_agg(.)
+               err <- error$AGG
+           }, "MAPA" = {
+               serie <- my_mapa(del, error$MAPA$agg)
            })
 
     serie <- trim_ts(serie, length(serie) - length(error$con), "start")
@@ -155,6 +179,10 @@ optimal_error <- function(error, opt)
                err <- error$Croston
            }, "ASACT" = {
                err <- error$ASACT
+           }, "AGG"  = {
+               err <- error$AGG
+           }, "MAPA" = {
+               err <- error$MAPA$error
            })
     return(err)
 }
@@ -190,23 +218,17 @@ sum_errors <- function(a, b)
     ema <- a$EMA$error + b$EMA$error
     croston <- a$Croston + b$Croston
     asact <- a$ASACT + b$ASACT
+    agg <- a$AGG + b$AGG
+#    mapa <- a$MAPA + b$MAPA
 
-    opt <- which.min(c(min(sma), min(ema), croston, asact))
-    opt <- switch(as.character(opt),
-                  "1" = "ADIDA - SMA",
-                  "2" = "ADIDA - EMA",
-                  "3" = "Croston",
-                  "4" = "ASACT")
+    opt <- which.min(c(min(sma), min(ema), croston, asact, agg))
+    opt <- opt_model(opt)
 
     ## We try to find an quasi optimal value. The first value close to the true minimum.
     sma_qmin <- which(abs(sma - min(sma)) < 0.05 * (max(sma) - min(sma)))[[1]]
     ema_qmin <- which(abs(ema - min(ema)) < 0.05 * (max(ema) - min(ema)))[[1]]
-    q_opt <- which.min(c(sma[[sma_qmin]], ema[[ema_qmin]], croston, asact))
-    q_opt <- switch(as.character(q_opt),
-                    "1" = "ADIDA - SMA",
-                    "2" = "ADIDA - EMA",
-                    "3" = "Croston",
-                    "4" = "ASACT")
+    q_opt <- which.min(c(sma[[sma_qmin]], ema[[ema_qmin]], croston, asact, agg))
+    q_opt <- opt_model(opt)
 
 
     structure(
@@ -215,6 +237,8 @@ sum_errors <- function(a, b)
             EMA = list(error = ema, opt = which.min(ema), q_opt = ema_qmin),
             Croston = croston,
             ASACT = asact,
+            AGG = agg,
+#            MAPA = mapa,
             opt = opt,
             q_opt = q_opt
         ),
@@ -226,6 +250,7 @@ sum_errors <- function(a, b)
 #' main
 if (FALSE) {
     ## Static consumption
+    client <- clus_tel_day$cvd[[1]]
     del <- clus_tel_day$del$orig[[1]]
     con <- clus_tel_day$con$orig[[1]]
     asact_init_serie <- clus_tel_day$del$orig[[1]]
@@ -235,27 +260,7 @@ if (FALSE) {
     del <- clus_tel_day$del$orig[[5]]
     con <- clus_tel_day$con$orig[[5]]
     asact_init_serie  <- clus_tel_day$del$orig[[5]]
-
-
-
-    ## Daily model
-    foo_rmse <- all_models(con, del, asact_time, asact_init_serie, error_type = "rmse")
-    foo_mae <- all_models(con, del, asact_time = "daily", asact_init_serie, error_type = "mae")
-
-    bar <- best_model_from_error(foo_rmse, "opt")
-
-    plot_error_model(foo_mae)
-    plot_mult_xts(bar)
-
-    ## Weekly model
-    all_models(clus_tel_week$con$orig[[5]], clus_tel_week$del$orig[[5]],
-               asact_time = "weekly", asact_init_serie = clus_tel_day$del$orig[[5]])
-
-    con <- clus_tel_week$con$orig[[5]]
-    del <- clus_tel_week$del$orig[[5]]
-
-    asact_time = "weekly"
-    asact_init_serie = clus_tel_day$del$orig[[5]]
+    asact_time = "daily"
 
 
     foo <- match_ends(con, del, "end")
@@ -278,8 +283,6 @@ if (FALSE) {
     serie_4 <- ASACT(asact_init_serie, asact_time) %>%
         normalize_relative(., del)
 
-    foo <- match_ends(con, serie_4, "end")
-    serie_4 <- foo[[2]]
 
     min_length <- min(lengths(series_1), lengths(series_2), length(serie_3),
                       length(serie_4), length(con))
@@ -288,17 +291,59 @@ if (FALSE) {
     serie_3 <- trim_ts(serie_3, length(serie_3) - min_length, "start")
     serie_4 <- trim_ts(serie_4, length(serie_4) - min_length, "start")
     con <- trim_ts(con, length(con) - min_length, "start")
-    del <- trim_ts(del, length(del) - min_length, "start")
+    del_trim <- trim_ts(del, length(del) - min_length, "start")
 
-    errors_1 <- sapply(series_1, error_calc, b = con, type = "mae")
-    errors_2 <- sapply(series_2, error_calc, b = con, type = "mae")
-    errors_3 <- sapply(serie_3, error_calc, b = con, type = "mae")
-    errors_4 <- sapply(serie_4, error_calc, b = con, type = "mae")
+    errors_1 <- sapply(series_1, error_calc, x = con, type = "rmse")
+    errors_2 <- sapply(series_2, error_calc, x = con, type = "rmse")
+    errors_3 <- sapply(serie_3, error_calc, x = con, type = "rmse")
+    errors_4 <- sapply(serie_4, error_calc, x = con, type = "rmse")
+
+
+    ## AGG model
+    serie_5 <- series_agg(series_1)
+    errors_5 <- error_calc(con, serie_5, "rmse")
+
+    ## MAPA daily aggregation level
+    serie_6 <- my_mapa(del, 10)
+    min_length <- min(length(serie_6), length(con))
+
+    serie_6 <- trim_ts(serie_6, length(serie_6) - min_length, "start")
+    con <- trim_ts(con, length(con) - min_length, "start")
+
+    errors_6 <- error_calc(x = con, f = serie_6, type = "rmse")
+
+    ## Daily model
+    foo_rmse <- all_models(con, del, asact_time, asact_init_serie, error_type = "rmse")
+
+    bar <- best_model_from_error(foo_rmse, "opt")
+
+    plot_error_model(foo_mae)
+    plot_mult_xts(bar)
+
 
     ## Monthly model
     all_models(clus_tel_month$con$orig[[2]], clus_tel_month$del$orig[[2]],
                asact_time = "monthly", asact_init_serie = clus_tel_day$del$orig[[2]])
 
-    plot_mult_xts(del, con)
-    plot_mult_xts(foo$SMA$serie[[150]], foo$con)
+    ## Weekly model
+    all_models(clus_tel_week$con$orig[[5]], clus_tel_week$del$orig[[5]],
+               asact_time = "weekly", asact_init_serie = clus_tel_day$del$orig[[5]])
+
+    ## MAPA error evolution
+    serie_6 <- my_mapa(del, 10, paral = 2)
+
+    serie_6 <- trim_ts(serie_6, length(serie_6) - min_length, "start")
+    con <- trim_ts(con, length(con) - min_length, "start")
+
+    errors_6 <- error_calc(x = con, f = serie_6, type = "rmse")
+
+    series_mapa <- mcmapply(function(x) my_mapa(del, x),
+                            2:10,
+                            mc.cores = 8,
+                            SIMPLIFY = FALSE)
+
+    sapply(series_mapa, function(x) error_calc(con, trim_ts(x, length(x) - min_length, "start"), "rmse"))
+
+    serie_6 <- my_mapa(del, 80, paral = 2)
+
 }

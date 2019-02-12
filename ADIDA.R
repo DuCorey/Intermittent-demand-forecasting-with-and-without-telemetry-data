@@ -96,13 +96,11 @@ ADIDA <- function(data, binsize, type)
 }
 
 
-agg_series <- function(series, func)
+series_agg <- function(series, func = mean)
 {
-    min_length <- min(lengths(series))
-    series <- lapply(series, function(x) trim_ts(x, length(x) - min_length, "start"))
     df <- as.data.frame(series, col.names = 1:length(series))
     res <- apply(df, 1, func) %>%
-        as.xts
+        as.xts(., order.by = index(series[[1]]))
     return(res)
 }
 
@@ -143,4 +141,11 @@ opt_agg <- function(con, del, model_f)
             errors = errors
         )
     )
+}
+
+if (FALSE) {
+    #' Series Aggregation
+    a <- generate_xts(5)
+    b <- generate_xts(5)
+    series_agg(list(a, b))
 }
