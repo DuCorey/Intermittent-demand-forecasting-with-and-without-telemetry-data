@@ -103,3 +103,9 @@ xts_range <- function(start, end)
     #' Create an xts range from start and end dates
     return(paste(start, end, sep = "::"))
 }
+
+
+generate_xts <- function(len) {
+    #' Generate a random xts series of length len
+    return(xts(runif(len), seq(from = Sys.Date(), by = 1, length.out = len)))
+}
