@@ -384,9 +384,9 @@ daily_consumption_from_telemetry_serie <- function(serie)
 
     ## Aggregation into daily bins
     serie %<>% as.data.frame
-    res <- aggregate(serie["first_difference"],
-                     format(serie["datetime"], "%Y-%m-%d"),
-                     function(x) -sum(x))
+    res <- stats::aggregate(serie["first_difference"],
+                            format(serie["datetime"], "%Y-%m-%d"),
+                            function(x) -sum(x))
     res$datetime <- as.Date.character(res$datetime)
     colnames(res) <- c("datetime", "value")
 
@@ -662,25 +662,29 @@ MatchedDelTel <- function(del, tel, depot_number, tanks_dp)
 }
 
 
+telemetry_from_tanks <- function(tanks)
+{
+    if (length(tanks) == 1) {
+        tel <- tanks[[1]]$telemetry.serie
+    } else {
+        ## We need to merge the telemetry deliveries from both tanks
+        ## To do so we merge the raw telemetry from both tanks
+        tel_list <- lapply(tanks, function(x) x$telemetry.serie)
+        tel <- stats::aggregate(. ~ datetime, data.table::rbindlist(tel_list), sum)
+    }
+    return(tel)
+}
+
+
 match_deliverie_tanks <- function(delivery, tanks, depot_number)
 {
     # Two cases to work with 1 del DP -> 1 tank, 1 del DP -> multiple tanks
     actual_del <- delivery_ts(delivery)
 
-    if (length(tanks) == 1) {
-        ## Case: 1 del -> 1 tank
-        tel_del <- deliveries_from_telemetry(tanks[[1]]$telemetry.serie,
-                                             threshold = 0, max_ratio = 1/6)
-    } else {
-        ## Case: 1 del -> multiple tanks
-        ## We need to merge the telemetry deliveries from both tanks
-        ## To do so we merge the raw telemetry from both tanks
-        tel_list <- lapply(tanks, . %>% .$telemetry.serie)
-        merged_tel <- aggregate(. ~ datetime, data.table::rbindlist(tel_list), sum)
-        tel_del <- deliveries_from_telemetry(merged_tel, threshold = 0, max_ratio = 1/6)
-    }
+    tel <- telemetry_from_tanks(tanks)
+    tel_del <- deliveries_from_telemetry(tel, threshold = 0, max_ratio = 1/6)
 
-    tanks_dp <- lapply(tanks, . %>% .$id)
+    tanks_dp <- lapply(tanks, function(x) x$id)
 
     if (is.null(tel_del)) {
         return(NULL)
@@ -731,8 +735,8 @@ client_delivery_ts <- function(client, source = c("raw", "tel"))
 client_consumption_ts <- function(client)
 {
     #' If the client has multiple tanks they are merged together
-    consumption_ts_list <- lapply(client$tank, . %>% .$consumption.serie)
-    merged <- as.data.frame(data.table::rbindlist(consumption_ts_list))
+    consumption_list <- lapply(client$tank, function(x) x$consumption.serie)
+    merged <- stats::aggregate(. ~ datetime, data.table::rbindlist(consumption_list), sum)
     return(merged)
 }
 
@@ -752,9 +756,9 @@ fetch_serie_time <- function(client, serie = c("tel", "del", "con"), start, end)
 {
     serie <- match.arg(serie)
     switch(serie,
-           tel = subset(client$tank[[1]]$telemetry.serie, datetime <= end & datetime >= start),
+           tel = subset(get_client_telemetry(client), datetime <= end & datetime >= start),
            del = subset(client$delivery$df, ShiftRealStartDateTime <= end & ShiftRealStartDateTime >= start)[,c("ShiftRealStartDateTime", "DeliveredQuantity")],
-           con = subset(client$tank[[1]]$consumption.serie, date <= end & date > start))
+           con = subset(client_consumption_ts(client), datetime <= end & datetime > start))
 }
 
 
@@ -824,7 +828,35 @@ filter_cvd <- function(cvd)
     res <- Filter(function(x) !is.null(x$matched), cvd) %>%
         filter_product(., c("LN2", "LO2", "LAR")) %>%
         Filter(function(x) !is.na(x$matched$ratio), .) %>%
-        filter_tank_unit(., c("inH2O"))
+        filter_tank_unit(., c("inH2O")) %>%
+        filter_client_del_con_ratio(., 0.5, 1.5)
+    return(res)
+}
+
+
+get_client_total_deliveries <- function(client, type)
+{
+    type <- match.arg(type, c("del", "tel"))
+    tot <- switch(type,
+                  tel = sum(client$matched$df$Amount, na.rm = TRUE),
+                  del = sum(client$matched$df$DeliveredQuantity, na.rm = TRUE))
+    return(tot)
+}
+
+
+client_del_con_ratio <- function(client)
+{
+    del <- get_client_total_deliveries(client, "tel")
+    con <- sum(client_consumption_ts(client)$value)
+    return(del/con)
+}
+
+
+filter_client_del_con_ratio <- function(cvd, low, high)
+{
+    res <- Filter(function(x) client_del_con_ratio(x) < high &&
+                              client_del_con_ratio(x) > low,
+                  cvd)
     return(res)
 }
 
@@ -850,6 +882,24 @@ get_client_matching_length <- function(client)
 get_client_correlation <- function(client)
 {
     return(client$matched$cor)
+}
+
+
+get_client_safety_level <- function(client, a = 0.2)
+{
+    return(a * sum(sapply(client$tank, function(x) x$max.level)))
+}
+
+
+get_client_safety_level_unit <- function(client)
+{
+    return(sapply(client$tank, function(x) x$max.level.unit))
+}
+
+
+get_client_telemetry <- function(client)
+{
+    return(telemetry_from_tanks(client$tank))
 }
 
 

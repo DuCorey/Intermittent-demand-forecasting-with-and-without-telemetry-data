@@ -38,7 +38,7 @@ deliveries_from_telemetry <- function(telemetry, threshold = 10, max_ratio = NUL
 
             ## Appending to vectors is the fastest way in R to store results
             ## from explicit loops.
-            date <- c(date, telemetry[j, 1])  # Start date of loop
+            date <- c(date, telemetry[j-1, 1])  # Start date of loop
             amount <- c(amount, sum(telemetry[j:(j + a - 1), "first_difference"]))
 
             j <- j + a  # Continue the loop but after our continuous refill counter
@@ -218,6 +218,19 @@ best_end_matching <- function(df)
             return(i)
         }
     }
+}
+
+
+peak_tel_at_del <- function(del, tel)
+{
+    #' Return the peak telemetry during a refill starting at time of delivery
+    j <- which(tel$datetime == del)
+    i <- j+1
+    while(tel$level[[i]] > tel$level[[j]]) {
+        j <- i
+        i <- i+1
+    }
+    return(tel$level[[j]])
 }
 
 
