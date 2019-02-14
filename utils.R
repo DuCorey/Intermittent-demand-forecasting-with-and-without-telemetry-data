@@ -2,7 +2,11 @@
 #' comments: this file contains utility functions for working on the code
 #' author: Corey Ducharme / corey.ducharme@polymtl.ca
 
+#' packages
 
+#' imports
+
+#' functions
 lapply_pb <- function(X, FUN, ...) {
     env <- environment()
     pb_Total <- length(X)
@@ -19,4 +23,18 @@ lapply_pb <- function(X, FUN, ...) {
     res <- lapply(X, wrapper, ...)
     close(pb)
     res
+}
+
+
+quoted_call <- function(fun, ..., dots = NULL)
+{
+    #' do.call but always quoted
+    do.call(fun, enlist(..., dots = dots), quote = TRUE)
+}
+
+
+enlist <- function(..., dots = NULL)
+{
+    #' Enlist parameters for do.calls
+    c(list(...), dots)
 }
