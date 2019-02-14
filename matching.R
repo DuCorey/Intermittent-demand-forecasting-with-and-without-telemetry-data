@@ -147,9 +147,9 @@ match_time_series <- function(a, b, time_window=10)
     f <- pryr::partial(get_a_match, time_list = b[[1]], time_window = time_window)
     res <- lapply(a[[1]], f)
 
-    matching_dates <- do.call(c, lapply(res, . %>% .[[1]]))
-    matching_values <- do.call(c, lapply(res, . %>% .[[2]]))
-    time_diffs <- do.call(c, lapply(res, . %>% .[[3]]))
+    matching_dates <- do.call(c, lapply(res, function(x) x[[1]]))
+    matching_values <- do.call(c, lapply(res, function(x) x[[2]]))
+    time_diffs <- do.call(c, lapply(res, function(x) x[[3]]))
 
     #' Merging both dataframes and lining up the matches
     #' Start by merging the data with the matches.

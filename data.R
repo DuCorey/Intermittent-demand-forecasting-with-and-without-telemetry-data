@@ -17,7 +17,7 @@ library(imputeTS)
 #' imports
 source("operators.R")
 source("matching.R")
-source("convert.R")
+#source("convert.R")
 
 #' functions
 ## blacklist DPs that have very odd problems that simply aren't worth the time
@@ -352,7 +352,7 @@ best_subsequence <- function(serie, consec)
             res <- sum(final_rle$lengths[a:b])
             split_res[[i]] <- list(a=a, b=b, length=res)
         }
-        c <- which.max(lapply(split_res, . %>% .$length))
+        c <- which.max(lapply(split_res, function(x) x$length))
 
         ## Converting the rle indexes into our original series
         start <- sum(final_rle$lengths[1:split_res[[c]]$a])
@@ -905,7 +905,6 @@ get_client_telemetry <- function(client)
 
 #' main
 if (FALSE) {  # Prevents it from running when sourcing the file
-    #' Main
     #' Data Analysis
 
     #' Are addreses the same for each tank that a client may have

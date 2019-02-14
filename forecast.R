@@ -5,12 +5,14 @@
 #' packages
 library(tsintermittent)
 library(forecast)
+library(MAPA)
 
 #' imports
 source("series.R")
 
 #' functions
-simple_croston <- function(data, alpha) {
+simple_croston <- function(data, alpha)
+{
     #' Simplest implementation of Croston's method to smooth intermittent time series
     n <- length(data)
     nzd <- which(data != 0)
@@ -42,21 +44,19 @@ simple_croston <- function(data, alpha) {
 }
 
 
-my_croston <- function(data, ...) {
-    ## Wrapper function over tsintermittent::crost
-
+my_croston <- function(data, ...)
+{
+    #' Wrapper function over tsintermittent::crost
     if (sum(data != 0) < 2) {
         warning("Croston requires a minimum of 2 non-zero values. Returning NULL.")
         return(NULL)
     }
-
     ## Convert data to numeric since the methods don't like to take xts input
     smoothed <- tsintermittent::crost(as.numeric(data), h = 0, init = "mean",
                                       init.opt = TRUE, type = "sba", ...)$frc.in
 
     ## Refit the time series so the times add match up again.
-    ## Croston being an exponential smoothing method will lose a time date
-
+    ## Croston being an exponential smoothing method will lose an observation
     smoothed_xts <- smoothed[!is.na(smoothed)] %>%
         xts(., order.by = tail(index(data), -1))
 
@@ -66,16 +66,15 @@ my_croston <- function(data, ...) {
 }
 
 
-my_ets <- function(data, ...) {
-    ## Wrapper function over forecast::ets
-
+my_ets <- function(data, ...)
+{
+    #' Wrapper function over forecast::ets
     if (nrow(data) < 1) {
         warning("ets requires a minimum of 1 value in the time series. Returning NULL.")
         return(NULL)
     }
 
-
-    ## Convert data to numeric since the methods don't like to take xts input
+    ## Convert data to numeric since the method don't like to take xts input
     res <- fitted(forecast::ets(as.numeric(data), model = "ZNN", ...)) %>%
         xts(., order.by = index(data))
 
@@ -87,6 +86,7 @@ my_ets <- function(data, ...) {
 
 ASACT <- function(serie, agg, ...)
 {
+    #' Implementation of ASACT forecast by (Murray et al. 2018)
     agg <- match.arg(agg, c("daily", "weekly", "monthly"))
 
     serie %<>% my_croston(.)
@@ -107,9 +107,10 @@ ASACT <- function(serie, agg, ...)
 }
 
 
-my_mapa <- function(data, agg, ...) {
-
-    smoothed <- mapa(ts(data), ppy = agg, fh = 0, display = 0, conf.lvl=NULL, type = "ets", ...)$infor
+my_mapa <- function(data, agg, ...)
+{
+    #' Wrapper over mapa
+    smoothed <- MAPA::mapa(ts(data), ppy = agg, fh = 0, display = 0, conf.lvl=NULL, type = "ets", ...)$infor
 
     smoothed_xts <- smoothed[!is.na(smoothed)] %>%
         xts(., order.by = tail(index(data), -agg))

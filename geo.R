@@ -33,10 +33,10 @@ init_latlon <- function(client_list)
     f <- pryr::partial(ggmap::geocode, output = "latlon")
     lat_lon <- lapply(address, f)
 
-    geo_df <- data.frame(uid=unlist(lapply(client_list, . %>% .$UID)),
+    geo_df <- data.frame(uid=unlist(lapply(client_list, function(x) x$UID)),
                          address=unlist(address),
-                         lon=unlist(lapply(lat_lon, .%>% .$lon)),
-                         lat=unlist(lapply(lat_lon, .%>% .$lat)))
+                         lon=unlist(lapply(lat_lon, function(x) x$lon)),
+                         lat=unlist(lapply(lat_lon, function(x) x$lat)))
     return(geo_df)
 }
 

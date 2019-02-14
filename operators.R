@@ -5,7 +5,7 @@
 #' packages
 library(pryr)
 
-#' source
+#' imports
 
 #'functions
 "%o%" <- pryr::compose
