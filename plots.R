@@ -21,7 +21,13 @@ plot_cluster_series <- function(clus, series)
 plot_mult_xts <- function(..., main = NULL, xlab = NULL, ylab = NULL, legend.names = NULL, col = NULL)
 {
     #' Plots multiple xts series together
-    plot(merge(...), main = main, xlab = xlab, ylab = ylab)
+    if (length(list(...)) == 1 && is.list(...)) {
+        data <- Reduce(merge, ...)
+    } else {
+        data <- merge(...)
+    }
+
+    plot(data, main = main, xlab = xlab, ylab = ylab)
     addLegend(legend.names = legend.names, col = col, lty = 1, bty = "o")
 }
 
