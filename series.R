@@ -105,7 +105,19 @@ xts_range <- function(start, end)
 }
 
 
-generate_xts <- function(len) {
+generate_xts <- function(len)
+{
     #' Generate a random xts series of length len
     return(xts(runif(len), seq(from = Sys.Date(), by = 1, length.out = len)))
+}
+
+
+make_xts <- function(data)
+{
+    #' Attempt to convert the data into xts data
+    if (is.list(data)) {
+        return(lapply(data, make_xts))
+    } else {
+        return(as.xts(ts(data)))
+    }
 }
