@@ -30,9 +30,6 @@ error_calc <- function(x, f, type)
     return(err)
 }
 
-safety_level <- get_client_safety_level(client, 0.1)
-tel <- get_client_telemetry(client)
-peak <- peak_tel_at_del(del, tel)
 
 next_day_under_safety_level <- function(del, con, peak, safety_level) {
     amount <- 0

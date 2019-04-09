@@ -98,9 +98,16 @@ ADIDA <- function(data, binsize, type)
 
 series_agg <- function(series, func = mean)
 {
+    #' Aggregate the series based on the function.
+    #' For time series each time period will be have the func applied to each
     df <- as.data.frame(series, col.names = 1:length(series))
-    res <- apply(df, 1, func) %>%
-        as.xts(., order.by = index(series[[1]]))
+    res <- apply(df, 1, func)
+
+    ## If the series as xts, we reformat the output to be xts
+    if (is.xts(series[[1]])) {
+        res %<>% as.xts(., order.by = index(series[[1]]))
+    }
+
     return(res)
 }
 

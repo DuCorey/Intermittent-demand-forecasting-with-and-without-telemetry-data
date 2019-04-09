@@ -110,6 +110,7 @@ ASACT <- function(serie, agg, ...)
 my_mapa <- function(data, agg, ...)
 {
     #' Wrapper over mapa
+    #' Don't use the parallel implementation of the function it is very poorly done
     smoothed <- MAPA::mapa(ts(data), ppy = agg, fh = 0, display = 0, conf.lvl=NULL, type = "ets", ...)$infor
 
     smoothed_xts <- smoothed[!is.na(smoothed)] %>%
