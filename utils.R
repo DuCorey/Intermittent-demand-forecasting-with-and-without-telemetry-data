@@ -38,3 +38,36 @@ enlist <- function(..., dots = NULL)
     #' Enlist parameters for do.calls
     c(list(...), dots)
 }
+
+
+has_dots <- function(foo)
+{
+    #' Check if a function has the ellipsis in its formals
+    is.function(foo) && !is.null(formals(foo)$`...`)
+}
+
+
+subset_dots <- function(dots = list(), foo)
+{
+    #' Subset dots for do.calls of functions without ellipsis
+    if (has_dots(foo)) {
+        dots
+    } else if (length(dots) > 0L) {
+        dots[intersect(names(dots), names(formals(foo)))]
+    } else {
+        list()
+    }
+}
+
+
+train_test_split <- function(l, n = 0.8)
+{
+    split <- round(length(l) * n)
+
+    structure(
+        list(
+            train = seq(from = 1, to = split),
+            test = seq(from = split + 1, to = length(l))
+        )
+    )
+}
