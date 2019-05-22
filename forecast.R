@@ -51,6 +51,8 @@ my_croston <- function(data, ...)
         warning("Croston requires a minimum of 2 non-zero values. Returning NULL.")
         return(NULL)
     }
+    ## Issue with Croston is that it has to begin with a non 0 value
+
     ## Convert data to numeric since the methods don't like to take xts input
     smoothed <- tsintermittent::crost(as.numeric(data), h = 0, init = "mean",
                                       init.opt = TRUE, type = "sba", ...)$frc.in

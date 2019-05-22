@@ -903,6 +903,19 @@ get_client_telemetry <- function(client)
 }
 
 
+train_test_split <- function(l, n = 0.8)
+{
+    split <- round(length(l) * n)
+
+    structure(
+        list(
+            train = seq(from = 1, to = split),
+            test = seq(from = split + 1, to = length(l))
+        )
+    )
+}
+
+
 #' main
 if (FALSE) {  # Prevents it from running when sourcing the file
     #' Data Analysis
