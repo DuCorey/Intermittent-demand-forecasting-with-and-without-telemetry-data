@@ -14,6 +14,7 @@ source("series.R")
 source("utils.R")
 source("forecast.R")
 source("ADIDA.R")
+source("error.R")
 
 #' functions
 client_cluster_con_serie <- function(client, time_scale)
@@ -133,6 +134,26 @@ cluster_data <- function(cvd, source, time_scale)
 }
 
 
+## get_clus_DPs <- function(clus)
+## {
+##     return(sapply(clus$cvd, function(x) x$DP))
+## }
+
+
+## filter_clus <- function(clus, set)
+## {
+##     ind <- get_clus_DPs(clus) %in% set
+
+##     clus$cvd %<>% .[ind]
+##     clus$con$series %<>% .[ind]
+##     clus$con$orig %<>% .[ind]
+##     clus$del$series %<>% .[ind]
+##     clus$del$orig %<>% .[ind]
+
+##     return(clus)
+## }
+
+
 del_clus_series <- function(clus_data, type)
 {
     #' Return deliveries series from the clustering data
@@ -159,10 +180,7 @@ mv_serie <- function(con, del, pad = NULL)
 {
     #' Return a multivate serie when given a con and del series
     merged <- merge(con, del) %>%
-        as.matrix(.)  # Conver to a matrix so we can add padding later
-
-    ## Clean up and remove time index
-    rownames(merged) <- NULL
+        as.matrix(.)  # We can't add padding to an xts object so we convert to matrix
 
     ## Remove NAs, can't use drop NA since this is a matrix
     merged <- merged[complete.cases(merged),]
@@ -182,9 +200,6 @@ mv_series <- function(clus_data, pad = NULL)
 {
     #' Produce multivariate series from the cluster_data
     return(lapply(clus_data, function(x) mv_serie(x$con$smooth, x$del$smooth, pad)))
-
-    ## TODO - Proabbly gonna need to track the amount of padding added to the series
-    ## for use later on.
 }
 
 
@@ -202,12 +217,49 @@ mv_series_del <- function(series)
 }
 
 
+data_smooth_dels <- function(data)
+{
+    res <- del_clus_series(data, "smooth") %>%
+        ## Carefully convert the delivery series to numeric so as to be consistent with the
+        ## data being sent over the the clusering method
+        lapply(., function(x) as.matrix(x)[,1])
+
+    return(res)
+}
+
+
+data_orig_dels <- function(data)
+{
+    res <- del_clus_series(data, "orig") %>%
+        lapply(., filter_year, time_scale = "days")
+    return(res)
+}
+
+
+data_smooth_con <- function(data)
+{
+    res <- con_clus_series(data, "smooth") %>%
+        lapply(., function(x) as.matrix(x)[,1])
+    return(res)
+}
+
+
+data_orig_con <- function(data)
+{
+    res <- con_clus_series(data, "orig") %>%
+        ## Carefully convert the delivery series to numeric so as to be consistent with the
+        ## data being sent over the the clusering method
+        lapply(., filter_year, time_scale = "days")
+    return(res)
+}
+
+
 ## TODO - Can we extend this to time series of less than 1 year or of mismatched time?
 ## Looks probable as the distance methods accept variable lenghts
-my_clustering <- function(clus_data, type, k, distmat = NULL, ...)
+my_clustering <- function(clus_data, series_type, k, trace = TRUE, ...)
 {
-    type <- match.arg(type, c("mv", "del"))
-    switch(type,
+    series_type <- match.arg(series_type, c("mv", "del"))
+    switch(series_type,
            "mv" = {
                series <- mv_series(clus_data)
            }, "del" = {
@@ -217,14 +269,8 @@ my_clustering <- function(clus_data, type, k, distmat = NULL, ...)
 
     if (k != 1) {
         clus <- dtwclust::tsclust(series,
-                                  type = "hierarchical",
-                                  preproc = zscore,
+                                  trace = trace,
                                   k = k,
-                                  distance = "gak",
-                                  trace = TRUE,
-                                  centroid = shape_extraction,
-                                  control = hierarchical_control(method = "ward.D2",
-                                                                 distmat = distmat),
                                   ...)
                       ## args = tsclust_args(dist = list(window.size = 2,
         ##                                 step.pattern = symmetric1)))
@@ -268,27 +314,50 @@ del_centroids <- function(clus)
 }
 
 
-mv_del_cluster_predictions <- function(newdata, clus)
-{
-    #' Predict which cluster to assign new_data
-    nm <- names(newdata)
+## del_datalist <- function(clus)
+## {
+##     #' Return the delivery sequence of the mv data in the cluster original data
+##     return(lapply(clus@datalist, function(x) x[,"del"]))
+## }
 
+
+clus_preproc <- function(newdata, clus)
+{
     ## Apply the preprocissing function on the data
     newdata <- quoted_call(
         clus@family@preproc,
         newdata,
         dots = subset_dots(clus@args$preproc, clus@family@preproc)
     )
+    return(newdata)
+}
 
-    ## Calculate the distance matrix to the delivery centroids
+
+clus_calc_distance_matrix <- function(newdata, clus, centroids)
+{
+    ## Calculate the distance matrix between the newdata and the centroids
     dist_mat <- quoted_call(
         clus@family@dist,
         x = newdata,
-        centroids = del_centroids(clus),
+        centroids = centroids,
         dots = clus@args$dist
     )
 
-    ## Apply the clustering function
+    return(dist_mat)
+}
+
+
+mv_del_cluster_predictions <- function(newdata, clus)
+{
+    #' Predict which cluster to assign new_data
+    nm <- names(newdata)
+    ## Preprocess the newdata with the cluster's preprocessing function
+    newdata <- clus_preproc(newdata, clus)
+
+    ## Calculate the distance matrix with the cluster's distance function
+    dist_mat <- clus_calc_distance_matrix(newdata, clus, del_centroids(clus))
+
+    ## Apply the cluster's clustering function
     ret <- clus@family@cluster(distmat = dist_mat, m = clus@control@fuzziness)
     names(ret) <- nm
 
@@ -296,15 +365,14 @@ mv_del_cluster_predictions <- function(newdata, clus)
 }
 
 
-clus_shapes <- function(clus, method = "mean")
+
+clus_shapes <- function(clus, method, con_shape_series)
 {
     #' How we determine the shapes of our cluster so we can use them in our
     #' future predictions
+    method <- match.arg(method, c("mean", "unzscore", "medoid", "centroid"))
 
-    method <- match.arg(method, c("mean", "unzscore"))
-
-    clus_con_orig <- mv_series_con(clus@orig_data)
-    clus_ids <- unique(clus@cluster)
+    clus_ids <- 1:clus@k
 
     switch(method,
            "mean" = {
@@ -316,7 +384,7 @@ clus_shapes <- function(clus, method = "mean")
 
                ## Determine the mean series for each cluster of the original consumption data
                shapes <- lapply(clus_ids,
-                                function(x) series_agg(clus_con_orig[clus@cluster == x]))
+                                function(x) series_agg(con_shape_series[clus@cluster == x], mean))
            }, "unzscore" = {
                ##' Method 2 - unzscore
                ## Since we scaled initially with the zscore we first perform an average 'unzscore'
@@ -327,64 +395,155 @@ clus_shapes <- function(clus, method = "mean")
 
                ## Getting the mean and sd for the consumption data of each cluster
                clus_mean <- sapply(clus_ids,
-                                   function(x) mean(sapply(clus_con_orig[clus@cluster == x], mean)))
+                                   function(x) mean(sapply(con_shape_series[clus@cluster == x], mean)))
                clus_sd <- sapply(clus_ids,
-                                 function(x) mean(sapply(clus_con_orig[clus@cluster == x], sd)))
+                                 function(x) mean(sapply(con_shape_series[clus@cluster == x], sd)))
 
                ## Apply the un_z_score to each centroid using the clus_mean and clus_sd
                centroids <- del_centroids(clus)
                shapes <- lapply(clus_ids,
                                 function(x) un_z_score(centroids[[x]], clus_mean[[x]], clus_sd[[x]]))
+           }, "medoid" = {
+               ##' Method 3 - The original serie of the medoid of the cluster
+               medoids_id <- lapply(clus_ids,
+                                    function(x) attributes(pam_cent(clus@datalist,
+                                                                    ids = which(clus@cluster == x),
+                                                                    distmat = clus@distmat))$series_id
+                                 )
+               shapes <- lapply(medoids_id, function(x) con_shape_series[[x]])
+           }, "centroid" = {
+               ##' Method 4 - The original centroid
+               ## Simply return the originaly calculated centroid.
+               ## Useful when there is no data preprocessing step in the clustering
+               shapes <- con_centroids(cluster)
            })
 
     return(shapes)
 }
 
 
-mv_clus_con_prediction <- function(clus, new_dels, orig_dels, shape = "mean")
+my_nearest_neighbors <- function(i, distance_matrix, k)
 {
-    #' Predict a consumption series for each element of new data
+    #' Return the nearest_neighbors for the ith row in the distance_matrix
+    return(order(distance_matrix[i, ])[1:k])
+}
+
+
+nn_shape <- function(method, con_shape_series)
+{
+    #' How we determine the shape of the nearest neighbors group of series
+    method <- match.arg(method, c("mean"))
+
+    switch(method,
+           "mean" = {
+               ##' Method 1 - mean
+               ## The shape is the mean of the series
+               shape <- series_agg(con_shape_series, mean)
+           }, "shape_extraction" = {
+               ##' Method 2 - shape extraction algorithm
+               ## The resulting serie will be z_normalized so that won't work
+               shape <- shape_extraction(con_shape_series)
+           })
+
+    return(shape)
+}
+
+
+#' This is dangerous you shouldn't ever need to do something like this.
+## is_multivariate <- function(x) {
+##     if (length(x) == 0L) {
+##         stop("Empty list of series received.") # nocov
+##     }
+
+##     ncols <- sapply(x, NCOL)
+
+##     if (any(diff(ncols) != 0L)) {
+##         stop("Inconsistent dimensions across series.")
+##     }
+
+##     any(ncols > 1L)
+## }
+
+
+## my_is_multivariate <- function(x)
+## {
+##     return(TRUE)
+## }
+
+
+## assignInNamespace("is_multivariate", is_multivariate, "dtwclust")
+
+## getFromNamespace("is_multivariate", "dtwclust")
+
+
+mv_clus_con_prediction <- function(clus, new_dels, shape, con_shape_series)
+{
     ## Predict a cluster for each delivery series
     pred_clus <- mv_del_cluster_predictions(new_dels, clus)
 
     ## Determine the shapes that will be used for the predictions
-    shapes <- clus_shapes(clus, shape)
+    shapes <- clus_shapes(clus, shape, con_shape_series)
 
     ## The predicted con is simply the shape associate to that cluster
     pred_con <- lapply(pred_clus, function(x) shapes[[x]])
 
+    return(pred_con)
+}
+
+
+mv_knn_con_prediction <- function(shape, con_shape_series, k, distmat)
+{
+
+    #' Find the nearest neighbors for each delivery series and create a shape
+    #' from the original consumption of those nearest neighbors
+    ## We need to find the nearest_neighbor for each new delivery
+    NNs <- lapply(1:nrow(distmat), function(i) my_nearest_neighbors(i, distmat, k))
+
+    ## The predicted consumption is the shape extracted from the consumption series of the nearest neighbours
+    pred_con <- lapply(NNs, function(x) nn_shape(con_shape_series[x], method = shape))
+
+    return(pred_con)
+}
+
+
+mv_con_prediction <- function(train, test, cluster, clustering, shape, shape_series, ...)
+{
+    #' Predict a consumption series for each element of the new_dels
+    ## Fetch the shape series
+    shape_series <- match.arg(shape_series, c("smooth", "orig"))
+    switch(shape_series,
+           "smooth" = {
+               con_shape_series <- data_smooth_con(train)
+           }, "orig" = {
+               con_shape_series  <- data_orig_con(train)
+           })
+
+    if (clustering == "NN") {
+        pred_con <- mv_knn_con_prediction(shape, con_shape_series, ...)
+    } else {
+        new_dels <- data_smooth_dels(test)
+        pred_con <- mv_clus_con_prediction(cluster, new_dels, shape, con_shape_series)
+    }
+
     ## Normalize the consumption prediction with the original delivery data
-    pred_con_norm <- mapply(function(x,y) xts(normalize_relative(x,y), order.by = index(y)),
-                       pred_con, orig_dels, SIMPLIFY = FALSE)
+    orig_dels <- data_orig_dels(test)
+    pred_con_norm <- mapply(function(x,y) xts(normalize_relative(x, y), order.by = index(y)),
+                            pred_con, orig_dels, SIMPLIFY = FALSE)
+
+    ## Sample error
+    orig_con <- data_orig_con(test)
+    err <- mapply(function(x,y) error_calc(x, y, "rmse"),
+                  pred_con_norm, orig_con, SIMPLIFY = FALSE)
 
     ## Ugly list formatting again
     res <- mapply(list,
-                  cluster = pred_clus,
-                  series = pred_con_norm,
+                  series = pred_con,
+                  norm = pred_con_norm,
+                  error = err,
                   SIMPLIFY = FALSE)
 
     return(res)
 }
-
-
-## get_clus_DPs <- function(clus)
-## {
-##     return(sapply(clus$cvd, function(x) x$DP))
-## }
-
-
-## filter_clus <- function(clus, set)
-## {
-##     ind <- get_clus_DPs(clus) %in% set
-
-##     clus$cvd %<>% .[ind]
-##     clus$con$series %<>% .[ind]
-##     clus$con$orig %<>% .[ind]
-##     clus$del$series %<>% .[ind]
-##     clus$del$orig %<>% .[ind]
-
-##     return(clus)
-## }
 
 
 ## distance_matrix <- function(data, fun)
@@ -432,10 +591,7 @@ mv_clus_con_prediction <- function(clus, new_dels, orig_dels, shape = "mean")
 ## a <- makeCache()
 
 if (FALSE) {  # Prevents it from running when sourcing the file
-    #' Testing dtw
-    library(dtw)
-    source("error.R")
-
+    #' dtw example
     a <- ts(sin(seq(0, 2*pi, length.out = 100)))
     b <- ts(sin(seq(pi, 2*pi, length.out = 50)))
     foo <- dtw(a, b, window.type = "slantedband", window.size = 2)
@@ -443,20 +599,18 @@ if (FALSE) {  # Prevents it from running when sourcing the file
     dtwPlotTwoWay(foo, a, b)
     dtwPlotThreeWay(foo, a, b)
 
-    #' This is to show equivalency between dtw_basic and dtw::dtw
-    dtw_basic(series[[1]], series[[2]], norm = "L1", step.pattern = symmetric1, window.size = 2)
+    #' This is to show equivalency between dtwclust::dtw_basic and dtw::dtw
+    data("uciCT")
+    series <- CharTraj
+    dtwclust::dtw_basic(series[[1]], series[[2]], norm = "L1", step.pattern = symmetric1, window.size = 2)
     dtw::dtw(proxy::dist(series[[1]], series[[2]], "L1"), step.pattern = symmetric1, window.type = "slantedband", window.size = 2, distance.only = TRUE)$distance
 
     #' Testing multivariate z_score from dtwcust
+    clus_tel_day <- readRDS("../data/master/clus_tel_day.rds")
     series <- mv_series(clus_tel_day)
     foo <- dtwclust::zscore(series[1:2])[[1]][,"con"]
     bar <- z_score(series[[1]][,"con"])
-    all.equal(foo, bar)  # You cannot use '==' but must instead you all.equal for numerics
-
-    #' Double checking equivalency between zscore
-    foo <- clus@datalist[[1]][,"con"]
-    bar <- clus@orig_data[[1]][,"con"]
-    all.equal(dtwclust::zscore(bar), foo)
+    all.equal(foo, bar)  # You cannot use '==' but must instead you all.equal for floats
 
     #' Testing the scaling method
     clus_tel_day <- readRDS("../data/master/clus_tel_day.rds")
@@ -466,51 +620,94 @@ if (FALSE) {  # Prevents it from running when sourcing the file
     bar <- normalize_relative(series[[1]][,'con'], clus_tel_day[[1]]$con$orig)
 
     #' Comparing the smoothing on the consumption data
-    clus_tel_day[[1]]$con$smooth
-    clus_tel_day[[1]]$con$orig %>%
+    foo <- clus_tel_day[[1]]$con$smooth
+    bar <- clus_tel_day[[1]]$con$orig %>%
         my_ets(.) %>%
         filter_year(., "days")
+    all.equal(foo, bar)
 
     #' Testing clustering
-    clus <- my_clustering(train[1:10], type = "mv", k = 2)
-    new_data <- train[1]
+    data <- clus_tel_day[1:10]
+    clus <- my_clustering(data, series_type = "mv", k = 2, preproc = zscore)
 
-    new_dels <- del_clus_series(new_data, "smooth") %>%
+    ##' Double checking equivalency between zscore with the preprocessing
+    ## Each part of the mv serie should be zscored independently
+    foo <- clus@datalist[[1]][,"con"] %>%  ## The result of the preprocessing by the clustering function
+        as.numeric
+    bar <- dtwclust::zscore(clus@orig_data[[1]][,"con"])
+     all.equal(bar, foo)
+
+    foo <- clus@datalist[[1]][,"del"] %>%  ## The result of the preprocessing by the clustering function
+        as.numeric
+    bar <- dtwclust::zscore(clus@orig_data[[1]][,"del"])
+    all.equal(bar, foo)
+
+    #' Prediction
+    ##' Cluster prediction
+    new_dels <- del_clus_series(data, "smooth") %>%
         ## Convert the delivery series to numeric so as to be consistent with the
         ## data being sent over the the clusering method
-        lapply(., as.numeric)
+        lapply(., function(x) as.matrix(x)[,1])
+    con_shape_series <- mv_series_con(clus@orig_data)
+
+    ## Apply the preprocessing function on the data
+    newdata <- clus_preproc(new_dels, clus)[[1]]
+    foo <- clus@datalist[[1]][,"del"] %>%  ## The result of the preprocessing by the clustering function
+        as.numeric
+    all.equal(newdata, foo)
+
+    ## Checking the distance matrix calculation
+    dist_mat <- clus_calc_distance_matrix(clus_preproc(new_dels, clus), clus, del_centroids(clus))
+    foo <- apply(dist_mat, 1, which.min)
+    bar <- mv_del_cluster_predictions(new_dels, clus)
+    all.equal(foo, bar)
+
+    ##' Consumption prediction
+    pred <- mv_clus_con_prediction(clus, new_dels, "mean", con_shape_series)
 
     pred_clus <- mv_del_cluster_predictions(new_dels, clus)
+    shapes <- clus_shapes(clus, "mean", con_shape_series)
+    pred_con_clus <- lapply(pred_clus, function(x) shapes[[x]])
 
-    shapes <- clus_shapes(clus, "mean")
+    all.equal(pred, pred_con_clus)
 
 
-    orig_dels <- del_clus_series(new_data, "orig") %>%
+    #' Nearest Neighbor
+    test_dels <- del_clus_series(data, "smooth") %>%
+        ## Convert the delivery series to numeric so as to be consistent with the
+        ## data being sent over the the clusering method
+        lapply(., function(x) as.matrix(x)[,1])
+    train_dels <- test_dels
+    clus <- my_clustering(data, series_type = "mv", k = 2, preproc = zscore)
+
+    distmat <- clus_calc_distance_matrix(test_dels, clus, train_dels)
+    NNs <- lapply(1:nrow(distmat), function(i) my_nearest_neighbors(i, distmat, 2))
+
+    pred_con_NN <- lapply(NNs, function(x) nn_shape(con_shape_series[x], method = "mean"))
+    pred_con <- mv_knn_con_prediction("mean", con_shape_series, k = 2, distmat = distmat)
+    all.equal(pred_con_NN, pred_con)
+
+    #' The top function
+    ##' Clustering
+    data <- clus_tel_day[1:10]
+    new_dels <- del_clus_series(data, "smooth") %>%
+        ## Convert the delivery series to numeric so as to be consistent with the
+        ## data being sent over the the clusering method
+        lapply(., function(x) as.matrix(x)[,1])
+    orig_dels <- del_clus_series(data, "orig") %>%
+        lapply(., filter_year, time_scale = "days")
+    orig_con <- con_clus_series(data, "orig") %>%
         lapply(., filter_year, time_scale = "days")
 
-    pred_con_norm <- mapply(function(x,y) xts(normalize_relative(x,y), order.by = index(y)),
-                            pred_con, orig_dels, SIMPLIFY = FALSE)
+    clus <- my_clustering(data, series_type = "mv", k = 2, preproc = zscore, trace = FALSE)
 
-    real_con <- con_clus_series(new_data, "orig") %>%
-        lapply(., filter_year, time_scale = "days")
+    pred_con <- mv_con_prediction(new_dels, orig_dels, orig_con, clus, clustering = "hierarchical", shape = "mean", shape_series = "smooth") %>%
+        lapply(., function(x) as.matrix(x$series)[,1])
 
-    err <- mapply(function(x,y) error_calc(x, y, "rmse"),
-                  pred_con_norm, real_con, SIMPLIFY = FALSE)
+    all.equal(pred_con, pred_con_clus)
 
-
-    plot_mult_xts(make_xts(mean_clus[[1]]), make_xts(clus_con_orig[[1]]))
-
-    plot_mult_xts(real_con[[1]], pred_con_norm[[1]])
-
-    plot_mult_xts(append(
-        lapply(clus_con_orig[clus@cluster == 1], as.xts %o% ts),
-        list(as.xts(ts(mean_clus[[1]])))
-    ))
-
-
-    plot_mult_xts(make_xts(z_score(mean_clus[[1]])), make_xts(con_centroids(clus)[[1]]))
-
-    plot(clus, type = "sc", 1)
-
+    pred_con <- mv_con_prediction(new_dels, orig_dels, orig_con, clus, clustering = "NN", shape = "mean", shape_series = "smooth", k = 2, distmat = distmat) %>%
+        lapply(., function(x) as.matrix(x$series)[,1])
+    all.equal(pred_con, pred_con_NN)
 
 }
