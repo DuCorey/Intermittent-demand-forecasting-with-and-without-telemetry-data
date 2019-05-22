@@ -112,6 +112,21 @@ series_agg <- function(series, func = mean)
 }
 
 
+cum_adida <- function(serie, max_bin, type = "SMA", agg_func = mean)
+{
+    #' Return the cumulative ADIDA model for the serie
+    #' Results are cumulated using the agg_func and the ADIDA model is done
+    #' with following the max_bin and the type
+    bins <- 1:max_bin
+    series <- lapply(bins, function(x) ADIDA(serie, x, type = type))
+    min_length <- min(lengths(series))
+    series %<>% lapply(., function(x) trim_ts(x, length(x) - min_length, "start"))
+    res <- series_agg(series, agg_func)
+
+    return(res)
+}
+
+
 opt_agg <- function(con, del, model_f)
 {
     #' Determine the optinal aggregation level (bin) for an ADIDA model
