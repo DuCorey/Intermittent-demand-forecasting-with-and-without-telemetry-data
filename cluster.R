@@ -358,12 +358,11 @@ mv_del_cluster_predictions <- function(newdata, clus)
     dist_mat <- clus_calc_distance_matrix(newdata, clus, del_centroids(clus))
 
     ## Apply the cluster's clustering function
-    ret <- clus@family@cluster(distmat = dist_mat, m = clus@control@fuzziness)
+    ret <- clus@family@cluster(distmat = dist_mat, m = clus@control$fuzziness)
     names(ret) <- nm
 
     return(ret)
 }
-
 
 
 clus_shapes <- function(clus, method, con_shape_series)
@@ -481,7 +480,7 @@ mv_clus_con_prediction <- function(clus, new_dels, shape, con_shape_series)
     ## Predict a cluster for each delivery series
     pred_clus <- mv_del_cluster_predictions(new_dels, clus)
 
-    ## Determine the shapes that will be used for the predictions
+    ## Determine the shapes for each cluster
     shapes <- clus_shapes(clus, shape, con_shape_series)
 
     ## The predicted con is simply the shape associate to that cluster
@@ -493,7 +492,6 @@ mv_clus_con_prediction <- function(clus, new_dels, shape, con_shape_series)
 
 mv_knn_con_prediction <- function(shape, con_shape_series, k, distmat)
 {
-
     #' Find the nearest neighbors for each delivery series and create a shape
     #' from the original consumption of those nearest neighbors
     ## We need to find the nearest_neighbor for each new delivery
@@ -501,6 +499,27 @@ mv_knn_con_prediction <- function(shape, con_shape_series, k, distmat)
 
     ## The predicted consumption is the shape extracted from the consumption series of the nearest neighbours
     pred_con <- lapply(NNs, function(x) nn_shape(con_shape_series[x], method = shape))
+
+    return(pred_con)
+}
+
+
+mv_fuzzy_con_prediction <- function(clus, new_dels, shape, con_shape_series)
+{
+    #' Return the consumption prediction for fuzzy clusters
+    ## Returns a fuzzy distance matrix to each centroid
+    pred_clus <- mv_del_cluster_predictions(new_dels, clus)
+
+    ## Determine the shapes for ever cluster
+    shapes <- clus_shapes(clus, shape, con_shape_series)
+
+    ## Apply the weighted sum of each cluster shape based on the fuzzy distance
+    ## to each centroid
+    pred_mat <- pred_clus %*% do.call(rbind, shapes)  # doing it with matrices
+
+    ## conver the matrix into a list for each row
+    pred_con <- plyr::alply(pred_mat, 1)
+    names(pred_con) <- NULL  # Sanitize the names
 
     return(pred_con)
 }
@@ -520,6 +539,9 @@ mv_con_prediction <- function(train, test, cluster, clustering, shape, shape_ser
 
     if (clustering == "NN") {
         pred_con <- mv_knn_con_prediction(shape, con_shape_series, ...)
+    } else if (clustering == "fuzzy" {
+        new_dels <- data_smooth_dels(test)
+        pred_con <- mv_fuzzy_con_prediction(cluster, new_dels, shape, con_shape_series)
     } else {
         new_dels <- data_smooth_dels(test)
         pred_con <- mv_clus_con_prediction(cluster, new_dels, shape, con_shape_series)
@@ -710,4 +732,20 @@ if (FALSE) {  # Prevents it from running when sourcing the file
         lapply(., function(x) as.matrix(x$series)[,1])
     all.equal(pred_con, pred_con_NN)
 
+    clus <- my_clustering(data, series_type = "mv", k = 2, preproc = zscore, type = "hierarchical")
+
+    #' Fuzzy clustering
+    train <- clus_tel_day[1:10]
+    test <- clus_tel_day[11:20]
+    clus <- my_clustering(train, series_type = "mv", k = 2, preproc = zscore, type = "fuzzy")
+
+    new_dels <- data_smooth_dels(test)
+
+    pred_clus <- mv_del_cluster_predictions(new_dels, clus)
+    con_shape_series <- data_smooth_con(train)
+    shapes <- clus_shapes(clus, "mean", con_shape_series)
+
+    pred_clus %*% do.call(rbind, shapes)
+
+    mv_fuzzy_con_prediction(clus, new_dels, "mean", con_shape_series)[[1]]
 }
