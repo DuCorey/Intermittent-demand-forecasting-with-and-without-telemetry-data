@@ -247,6 +247,364 @@ sum_errors <- function(a, b)
 }
 
 
+asact_con_preds <- function(data)
+{
+    #' Return the asact predictions for the customers in the data
+    #' Asact is calculated from the Croston smoothing of the deliveries, then
+    #' normalized to conserve the original deliveries quantity.
+    smooth_dels <- data_smooth_dels(data)
+    orig_dels <- data_orig_dels(data)
+    pred <- mapply(function(x,y) xts(normalize_relative(x, y), order.by = index(y)),
+                   smooth_dels, orig_dels, SIMPLIFY = FALSE)
+    return(pred)
+}
+
+
+cum_adida_preds <- function(data)
+{
+    #' Return the cumulative ADIDA predictions for the customers in the data
+    #' CumADIDA is mean aggregation of the ADIDA models ran on the deliveries.
+    smooth_dels <- data_smooth_dels(data)
+    orig_dels <- data_orig_dels(data)
+    pred <- mclapply(orig_dels, cum_adida, max_bin = 180, mc.cores = 8)
+    return(pred)
+}
+
+
+con_preds <- function(train, test, cluster, clustering, shape, shape_series, ...)
+{
+
+    clus_pred <- mv_con_prediction(train, test, cluster, clustering, shape, shape_series, ...) %>%
+        ## We only take the normalize predicted series from the object
+        lapply(., function(x) x$norm)
+
+    ## These two are taken from the global namespace to speed up the calculations
+    ## Fix this for production
+    asact_pred <- asact_preds
+    cum_pred <- cum_preds
+
+    orig_con <- data_orig_con(test)
+
+    ## We need to cut down all the series to the minimum length of our predictions
+    min_length <- length(cum_pred[[1]])
+
+    clus_pred %<>% lapply(., function(x) trim_ts(x, length(x) - min_length, how = "start"))
+    asact_pred %<>% lapply(., function(x) trim_ts(x, length(x) - min_length, how = "start"))
+    real_con <- lapply(orig_con, function(x) trim_ts(x, length(x) - min_length, how = "start"))
+
+    ## Calculate the error by comparing the the real consumption
+    clus_err <- mapply(function(x,y) error_calc(x, y, "rmse"), clus_pred, real_con, SIMPLIFY = FALSE)
+    asact_err <- mapply(function(x,y) error_calc(x, y, "rmse"), asact_pred, real_con, SIMPLIFY = FALSE)
+    cum_err <- mapply(function(x,y) error_calc(x, y, "rmse"), cum_pred, real_con, SIMPLIFY = FALSE)
+
+    res <- mapply(list,
+                  clus = mapply(list, pred = clus_pred, err = clus_err, SIMPLIFY = FALSE),
+                  asact = mapply(list, pred = asact_pred, err = asact_err, SIMPLIFY = FALSE),
+                  cum = mapply(list, pred = cum_pred, err = cum_err, SIMPLIFY = FALSE),
+                  SIMPLIFY = FALSE)
+    return(res)
+}
+
+
+sum_con_pred_error <- function(err)
+{
+    clus <- sum(sapply(err, function(x) x$clus$err))
+    asact <- sum(sapply(err, function(x) x$asact$err))
+    cum <- sum(sapply(err, function(x) x$cum$err))
+
+    structure(
+        list(
+            clus = clus,
+            asact = asact,
+            cum = cum
+        )
+    )
+}
+
+
+series_id <- function(series)
+{
+    #' Return an identification string for the series type
+    id <- character(0)
+
+    if (series$del == "smooth") {
+        id <- paste(id, "S", sep = "")
+    } else if (series$del == "raw") {
+        id <- paste(id, "R", sep = "")
+    } else {
+        id <- paste(id, "N", sep = "")
+    }
+
+    if (series$con == "smooth") {
+        id <- paste(id, "S", sep="")
+    } else if (series$con == "raw") {
+        id <- paste(id, "R", sep = "")
+    } else {
+        id <- paste(id, "N", sep = "")
+    }
+
+    id <- paste(id, series$pad, sep = "")
+
+    return(id)
+}
+
+
+run_CFM_clus <- function(model, cache = TRUE)
+{
+    #' Run the model on the train and test data
+    #' When possible used cached results that have been precomputed
+
+    cat(sprintf("Running segmentation with parameters:\r
+series = %s\r
+centroid = %s\r
+clustering = %s\r
+k = %s\r
+cluster shape = %s\r
+cluster series = %s\n",
+series_id(model$series), model$centroid, model$clustering, model$k,
+model$shape$method, model$shape$series))
+
+    ## 1. Determine the distane matrx for clustering
+    ## if the model is fuzzy and the centroid function fuzzy c-means there is no
+    ## distance matrix
+
+    dist_id <- paste(series_id(model$series), model$preproc, model$distance, sep = "_")
+
+    if (cache & model$centroid != "fcm") {
+        cat("Loading distance matrix from cache.\n")
+        dist_mat <- load_cache(dist_id, cache = "distance")
+    } else {
+        dist_mat <- NULL
+    }
+
+    ## When running the model with dtwclust::tsclust, we need the preprocessing
+    ## function and the clustering function (only when using hierarchical
+    ## clustering) to be an actual function. If not, tsclust stores the reference
+    ## to the variable which may contain the function. This causes errors when
+    ## running the distance matrix seperately and when printing the cluster
+    ## information. To fix this we use quote, substitution and eval to run
+    ## tsclust.
+
+    ## Quote the preprocessing function
+    if (is.null(model$preproc)) {
+        preproc_f_quote <- NULL
+    } else if (model$preproc == "zscore") {
+        preproc_f_quote <- quote(zscore)
+    } else {
+        stop("Unsupported preprocessing function given.\n")
+    }
+
+    ## Hierarchical model we need to quote for the function unless we use pam the default
+    ## When not doing hierarchical, we just keep the simple string for the later substitution
+    if (model$clustering == "hierarchical") {
+        if (model$centroid == "shape_extraction") {
+            centroid_f_quote <- quote(shape_extraction)
+        } else if (model$centroid == "DBA") {
+            centroid_f_quote <- quote(dba)
+        } else if (model$centroid == "pam") {
+            centroid_f_quote <- "pam"
+        } else {
+            stop("Unsupported hierarchical centroid function given.\n")
+        }
+    } else {
+        centroid_f_quote <- model$centroid
+    }
+
+    ## If no distance is found in the cache run it and save it again unless the
+    ## centroid is fcm
+    if (is.null(dist_mat) & model$centroid != "fcm") {
+        cat("No distance matrix found in the cache; computing it.\n")
+
+        init_clus <- eval(substitute(
+            my_clustering(model$train,
+                          series_type = model$series,
+                          k = 2,
+                          preproc = preproc_f,
+                          distance = model$distance,
+                          args = model$dist_args,
+                          type = "partitional",
+                          trace = FALSE),
+            list(preproc_f = preproc_f_quote)))
+
+        dist_mat <- init_clus@distmat
+
+        ## Cache the distance matrix for future use
+        if (cache) {
+            cat("Caching distance matrix.\r")
+            save_cache(dist_mat, dist_id, "distance")
+        }
+    }
+
+    ## 2. Segmentation
+
+    ## Add the distmat to the control argument unless the centroid is fcm
+    control <- model$control
+    if (model$centroid != "fcm") {
+        control$distmat <- dist_mat
+    }
+
+    if (model$clustering == "hierarchical" & centroid_f_quote == "pam") {
+        ## When using hierarhical clustering with "pam", that method is the
+        ## default for the function call. So we don't include it in the
+        ## substitute and eval.
+        cluster <- eval(substitute(
+            my_clustering(model$train,
+                          series_type = model$series,
+                          k = model$k,
+                          preproc = preproc_f,
+                          distance = model$distance,
+                          args = model$dist_args,
+                          type = model$clustering,
+                          control = control),
+            list(preproc_f = preproc_f_quote)))
+    } else {
+        cluster <- eval(substitute(
+            my_clustering(model$train,
+                          series_type = model$series,
+                          k = model$k,
+                          preproc = preproc_f,
+                          distance = model$distance,
+                          args = model$dist_args,
+                          centroid = centroid_f,
+                          type = model$clustering,
+                          control = control),
+            list(preproc_f = preproc_f_quote,
+                 centroid_f = centroid_f_quote)))
+    }
+
+    ## 3. Forecasts
+    cat("Generating forecasts.\n")
+    preds <- con_preds(model$train, model$test, cluster, model$clustering,
+                       model$shape$method, model$shape$series)
+    total_error <- sum_con_pred_error(preds)
+
+    structure(
+        list(
+            model = model,
+            cluster = cluster,
+            preds = preds,
+            total_error = total_error
+        ),
+        class = "ConsumptionForecasts"
+    )
+}
+
+
+run_CFM_NN <- function(model, cache = TRUE)
+{
+    ##' The nearest neighbor approach looks at the distance between delivery
+    cat(sprintf("Running Nearest Neighbour segmentation with parameters:\r
+series = %s\r
+k = %s\r
+shape method = %s\r
+shape series = %s\n",
+series_id(model$series), model$k, model$shape$method, model$shape$series))
+
+    ## 1. Determine the NN distane matrix between test and train set
+    dist_id <- paste("NN", series_id(model$series), model$preproc, model$distance, sep = "_")
+
+    if (cache) {
+        cat("Loading distance matrix from cache.\n")
+        dist_mat <- load_cache(dist_id, cache = "distance")
+    } else {
+        dist_mat <- NULL
+    }
+
+    ## Quote the preprocessing function
+    if (is.null(model$preproc)) {
+        preproc_f_quote <- NULL
+    } else if (model$preproc == "zscore") {
+        preproc_f_quote <- quote(zscore)
+    } else {
+        stop("Unsupported preprocessing function given.")
+    }
+
+    ## If no distance is found in the cache run it and save it
+    if (is.null(dist_mat)) {
+        cat("No distance matrix found in the cache; computing it.\n")
+
+        ## We don't need the full clustering object only the generated
+        ## preprocessing and distance functions based on the model. As such, we
+        ## create a 'dummy' clustering model with only a few datapoints
+        cluster <- eval(substitute(
+            my_clustering(model$train[1:3],
+                          series_type = model$series,
+                          k = 2,
+                          preproc = preproc_f,
+                          distance = model$distance,
+                          args = model$dist_args,
+                          type = "partitional",
+                          trace = FALSE),
+            list(preproc_f = preproc_f_quote)))
+
+        ## Calculate the distance matrix between the test deliveries and the train deliveries
+        ## using the distance function from cluster
+        test_dels <- data_smooth_dels(test)
+        test_dels <- clus_preproc(test_dels, cluster)
+        train_dels <- data_smooth_dels(train)
+        train_dels <- clus_preproc(train_dels, cluster)
+        dist_mat <- clus_calc_distance_matrix(test_dels, cluster, train_dels)
+
+        ## Cache the distance matrix for future use
+        if (cache) {
+            cat("Caching distance matrix.\n")
+            save_cache(dist_mat, dist_id, "distance")
+        }
+    }
+
+    ## 2. Forecasts
+    cat("Generating forecasts.\n")
+    preds <- con_preds(model$train, model$test, cluster, model$clustering, model$shape$method,
+                       model$shape$series, k=model$k, distmat = dist_mat)
+    total_error <- sum_con_pred_error(preds)
+
+    structure(
+        list(
+            model = model,
+            cluster = cluster,
+            distmat = dist_mat,
+            preds = preds,
+            total_error = total_error
+        ),
+        class = "ConsumptionForecasts"
+    )
+}
+
+
+print.ConsumptionForecasts <- function(x, ...)
+{
+    cat("Total error for model:\n")
+    print(x$total_error)
+}
+
+
+run_CFM <- function(model, cache = TRUE)
+{
+    if (model$clustering == "NN") {
+        res <- run_CFM_NN(model, cache)
+    } else {
+        res <- run_CFM_clus(model, cache)
+    }
+    return(res)
+}
+
+
+CFM <- function(...)
+{
+    structure(
+        list(...),
+        class = "ConsumptionForecastModel"
+    )
+}
+
+
+print.ConsumptionForecastModel <- function(x, ...)
+{
+    do_not_print <- c("train", "test")
+    print(x[!(names(x) %in% do_not_print)])
+}
+
+
 #' main
 if (FALSE) {
     ## Static consumption
