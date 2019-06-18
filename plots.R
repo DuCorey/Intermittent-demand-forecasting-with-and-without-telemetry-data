@@ -58,8 +58,9 @@ plot.ErrorModel <- function(mod, main = NULL, xlab = NULL, ylab = NULL, q_opt = 
     ggplot(NULL) +
         geom_point(data = sma_data, aes(y = y, x = x, color = "SMA", size = size), show.legend = F) +
         geom_point(data = ema_data, aes(y = y, x = x, color = "EMA", size = size), show.legend = F) +
-        geom_line(aes(y = mod$Croston, x = agg_level, color = "Croston"), size = 1.5) +
-        ##geom_line(aes(y = mod$ASACT, x = agg_level, color = "ASACT"), size = 1.5, linetype = "longdash") +
+                                        #geom_line(aes(y = mod$Croston, x = agg_level, color = "Croston"), size = 1.5) +
+        geom_line(aes(y = mod$AGG, x = agg_level, color = "AGG"), size = 1.5) +
+        geom_line(aes(y = mod$ASACT, x = agg_level, color = "ASACT"), size = 1.5, linetype = "longdash") +
         geom_text(data = annotations, aes(x = x, y = y, label = text)) +
         scale_color_manual(values = cbPalette) +
         guides(color=guide_legend(title=NULL)) +
@@ -70,7 +71,8 @@ plot.ErrorModel <- function(mod, main = NULL, xlab = NULL, ylab = NULL, q_opt = 
 plot_series_error <- function(error_model, main = NULL, xlab = NULL, ylab = NULL, legend.names = NULL, col = NULL)
 {
     con <- error_model$con
-    sma <- get_error_model(error_model, "SMA")
+    sma <- get_error_model(error_model, "ADIDA - SMA")
     crost <- get_error_model(error_model, "Croston")
-    plot_mult_xts(con, sma, crost, main = main, xlab = xlab, ylab = ylab, legend.names = legend.names, col = col)
+    agg <- get_error_model(error_model, "AGG")
+    plot_mult_xts(con, sma, crost, agg, main = main, xlab = xlab, ylab = ylab, legend.names = legend.names, col = col)
 }

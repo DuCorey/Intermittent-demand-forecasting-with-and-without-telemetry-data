@@ -67,6 +67,7 @@ filtered_substitute <- function(expr, env)
     #' The expression must be quoted to be passed properly.
 
     #' Example
+    #' f1 <- function(x=1,y=1,z=1) x+y+z
     #' expr <- quote(f1(x = a, y = 2, z = b))
     #' env <- list(a = 1, b = NULL)
     #' filted_substitute(expr, env)
