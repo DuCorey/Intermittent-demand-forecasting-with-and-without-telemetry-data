@@ -176,7 +176,7 @@ con_clus_series <- function(clus_data, type)
 }
 
 
-mv_serie <- function(con, del, pad = NULL)
+mv_serie <- function(con, del, pad = 0)
 {
     #' Return a multivate serie when given a con and del series
     merged <- merge(con, del) %>%
@@ -186,7 +186,7 @@ mv_serie <- function(con, del, pad = NULL)
     merged <- merged[complete.cases(merged),]
 
     ## Add some 0 padding for the mv clustering method
-    if (!is.null(pad)) {
+    if (pad > 0) {
         zeros <- rep(0, times = pad)
         padding <- as.matrix(data.frame(con = zeros, del = zeros))
         merged <- rbind(padding, merged, padding)
@@ -223,7 +223,6 @@ data_smooth_dels <- function(data)
         ## Carefully convert the delivery series to numeric so as to be consistent with the
         ## data being sent over the the clusering method
         lapply(., function(x) as.matrix(x)[,1])
-
     return(res)
 }
 
@@ -239,6 +238,8 @@ data_orig_dels <- function(data)
 data_smooth_con <- function(data)
 {
     res <- con_clus_series(data, "smooth") %>%
+        ## Carefully convert the delivery series to numeric so as to be consistent with the
+        ## data being sent over the the clusering method
         lapply(., function(x) as.matrix(x)[,1])
     return(res)
 }
@@ -247,8 +248,6 @@ data_smooth_con <- function(data)
 data_orig_con <- function(data)
 {
     res <- con_clus_series(data, "orig") %>%
-        ## Carefully convert the delivery series to numeric so as to be consistent with the
-        ## data being sent over the the clusering method
         lapply(., filter_year, time_scale = "days")
     return(res)
 }
@@ -539,7 +538,7 @@ mv_con_prediction <- function(train, test, cluster, clustering, shape, shape_ser
 
     if (clustering == "NN") {
         pred_con <- mv_knn_con_prediction(shape, con_shape_series, ...)
-    } else if (clustering == "fuzzy" {
+    } else if (clustering == "fuzzy") {
         new_dels <- data_smooth_dels(test)
         pred_con <- mv_fuzzy_con_prediction(cluster, new_dels, shape, con_shape_series)
     } else {
@@ -737,7 +736,7 @@ if (FALSE) {  # Prevents it from running when sourcing the file
     #' Fuzzy clustering
     train <- clus_tel_day[1:10]
     test <- clus_tel_day[11:20]
-    clus <- my_clustering(train, series_type = "mv", k = 2, preproc = zscore, type = "fuzzy")
+    clus <- my_clustering(train, series_type = "mv", k = 2, preproc = zscore, type = "fuzzy", centroid = "fcm")
 
     new_dels <- data_smooth_dels(test)
 
@@ -749,3 +748,6 @@ if (FALSE) {  # Prevents it from running when sourcing the file
 
     mv_fuzzy_con_prediction(clus, new_dels, "mean", con_shape_series)[[1]]
 }
+
+## args = tsclust_args(dist = list(window.size = 2,
+##                                 step.pattern = symmetric1)
