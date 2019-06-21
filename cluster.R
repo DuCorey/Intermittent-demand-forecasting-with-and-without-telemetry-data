@@ -3,7 +3,6 @@
 #' author: Corey Ducharme / corey.ducharme@polymtl.ca
 
 #' packages
-library(dtwclust)
 library(parallel)
 
 #' imports
@@ -15,6 +14,7 @@ source("utils.R")
 source("forecast.R")
 source("ADIDA.R")
 source("error.R")
+source("dtwclust")
 
 #' functions
 client_cluster_con_serie <- function(client, time_scale)

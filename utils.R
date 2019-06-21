@@ -26,40 +26,6 @@ lapply_pb <- function(X, FUN, ...) {
 }
 
 
-quoted_call <- function(fun, ..., dots = NULL)
-{
-    #' do.call but always quoted
-    do.call(fun, enlist(..., dots = dots), quote = TRUE)
-}
-
-
-enlist <- function(..., dots = NULL)
-{
-    #' Enlist parameters for do.calls
-    c(list(...), dots)
-}
-
-
-has_dots <- function(foo)
-{
-    #' Check if a function has the ellipsis in its formals
-    is.function(foo) && !is.null(formals(foo)$`...`)
-}
-
-
-subset_dots <- function(dots = list(), foo)
-{
-    #' Subset dots for do.calls of functions without ellipsis
-    if (has_dots(foo)) {
-        dots
-    } else if (length(dots) > 0L) {
-        dots[intersect(names(dots), names(formals(foo)))]
-    } else {
-        list()
-    }
-}
-
-
 filtered_substitute <- function(expr, env)
 {
     #' Works exactly like substitute but removes any arguments from the expression
