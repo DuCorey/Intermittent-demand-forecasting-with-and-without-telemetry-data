@@ -108,20 +108,22 @@ series_agg <- function(series, func = mean)
     #' Aggregate the series based on the function.
     #' For time series each time period will be have the func applied to each
     #' Also works for multivariate series where each variable will be aggregated
-    ncols <- sapply(series, NCOL)
-    if (any(diff(ncols) != 0L)) {
-        stop("Inconsistent dimensions across series.")
-    }
-    L <- ncols[[1]]
-    res <- vector("list", L)
+    if (is_multivariate(series)) {
+        L <- ncols[[1]]
+        res <- vector("list", L)
 
-    for (i in seq_len(L)) {
-        series_sub <- lapply(series, function(x) x[,i])
-        df <- as.data.frame(series_sub, col.names = 1:length(series_sub))
-        res[[i]] <- apply(df, 1, mean)
-    }
+        for (i in seq_len(L)) {
+            series_sub <- lapply(series, function(x) x[,i])
+            df <- as.data.frame(series_sub, col.names = 1:length(series_sub))
+            res[[i]] <- apply(df, 1, func)
+        }
 
-    res <- Reduce(cbind, res)
+        res <- Reduce(cbind, res)
+    } else {
+        #' Univariate series
+        df <- as.data.frame(series, col.names = 1:length(series))
+        res <- apply(df, 1, func)
+    }
 
     colnames(res) <- colnames(series[[1]])
 
