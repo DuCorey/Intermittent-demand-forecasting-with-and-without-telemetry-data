@@ -8,4 +8,4 @@ library(pryr)
 #' imports
 
 #'functions
-"%o%" <- pryr::compose
+"%c%" <- pryr::compose

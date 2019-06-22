@@ -86,16 +86,16 @@ cluster_data <- function(cvd, source, time_scale)
 
     print("Preprocessing delivery data")
     del <- mclapply(del_orig,
-                    pryr::partial(filter_year, time_scale = time_scale) %o% my_croston,
+                    pryr::partial(filter_year, time_scale = time_scale) %c% my_croston,
                     mc.cores = 8)
 
     print("Preprocessing consumption data")
     con <- mclapply(con_orig,
-                    pryr::partial(filter_year, time_scale = time_scale) %o% my_ets,
+                    pryr::partial(filter_year, time_scale = time_scale) %c% my_ets,
                     mc.cores = 8)
 
     ## Combine both truth series of not null values for del and con
-    f <- not %o% is.null
+    f <- not %c% is.null
     ind <- sapply(del, f) & sapply(con, f)
     del <- del[ind]
     con <- con[ind]
@@ -548,7 +548,7 @@ mv_con_prediction <- function(train, test, cluster, clustering, shape, shape_ser
 
 ## distance_matrix <- function(data, fun)
 ## {
-##     series <- lapply(data, z_transform %o% fun)
+##     series <- lapply(data, z_transform %c% fun)
 ##     ## Since the time series are in days the lag.max is 14
 ##     dm <- TSdist::TSDatabaseDistances(series, distance = "dtw", lag.max = 14)
 ##     return(dm)

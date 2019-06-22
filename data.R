@@ -52,7 +52,7 @@ DeliveryData <- function()
     merged_data <-
         ## Don't use rbindlist it will cause errors later when converting the dates
         do.call(rbind,
-                lapply(files, fix_raw_delivery_column_names %o% read_csv_skip_second_line)) %>%
+                lapply(files, fix_raw_delivery_column_names %c% read_csv_skip_second_line)) %>%
         tidyr::drop_na(., X, DPNumber) %>%
 
         ## We only keep distinct deliveries based on ShiftRealStartDateTime

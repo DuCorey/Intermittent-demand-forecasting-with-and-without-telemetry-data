@@ -129,7 +129,7 @@ match_time_series <- function(a, b, time_window=10)
 
         f <- pryr::partial(difftime, time2 = x, units = "hours")
 
-        res <- sapply(updated_time_list, abs %o% as.double %o% f)
+        res <- sapply(updated_time_list, abs %c% as.double %c% f)
 
         small_ind <- which.min(res)
 
