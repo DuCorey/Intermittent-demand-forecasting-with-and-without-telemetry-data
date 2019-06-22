@@ -4,6 +4,7 @@
 
 #' packages
 library(parallel)
+library(scales)
 
 #' imports
 source("data.R")
@@ -541,6 +542,28 @@ mv_con_prediction <- function(train, test, cluster, clustering, shape, shape_ser
                   norm = pred_con_norm,
                   error = err,
                   SIMPLIFY = FALSE)
+
+    return(res)
+}
+
+
+cluster_table <- function(c1, c2)
+{
+    #' Return the cross tabulation table between the clusters c1 and c2
+    #' Return the greatest elements in the table and their weight in the cluster
+    orig <- table(con_clus@cluster, del_clus@cluster)
+
+    dels <- apply(orig, 1, function(x) paste("D", which.max(x), "-", scales::percent(max(x)/sum(x)), sep = ""))
+    dels <- matrix(dels, ncol = 1)
+    colnames(dels) <- "%"
+
+    cons <- apply(orig, 2, function(x) paste("C", which.max(x), "-", scales::percent(max(x)/sum(x)), sep = ""))
+    cons <- matrix(cons, nrow = 1)
+    rownames(cons) <- "%"
+
+    res <- cbind(orig, dels)
+    res <- plyr::rbind.fill.matrix(res, cons)
+    rownames(res) <- c(rownames(orig), "%")
 
     return(res)
 }
