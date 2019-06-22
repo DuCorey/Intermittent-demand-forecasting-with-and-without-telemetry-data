@@ -75,27 +75,6 @@ get_del_series <- function(cvd, source, time_scale)
 }
 
 
-filter_year <- function(serie, time_scale, year = "2016")
-{
-    if (is.null(serie)) {
-        return(NULL)
-    }
-
-    time_scale <- match.arg(time_scale, c("weeks", "days", "months"))
-
-    #' Filter time series for a specific year
-    filt <- serie[format(index(serie), "%Y") == as.character(year)]
-    n_periods <- switch(time_scale,
-                        weeks = 52, days = 365, months = 12)
-
-    if (nrow(filt) >= n_periods) {
-        return(filt)
-    } else {
-        return(NULL)
-    }
-}
-
-
 cluster_data <- function(cvd, source, time_scale)
 {
     ## Get the data
@@ -322,7 +301,7 @@ del_centroids <- function(clus)
 
 clus_preproc <- function(newdata, clus)
 {
-    ## Apply the preprocissing function on the data
+    #' Apply the preprocissing function on the data
     newdata <- quoted_call(
         clus@family@preproc,
         newdata,
@@ -334,7 +313,7 @@ clus_preproc <- function(newdata, clus)
 
 clus_calc_distance_matrix <- function(newdata, clus, centroids)
 {
-    ## Calculate the distance matrix between the newdata and the centroids
+    #' Calculate the distance matrix between the newdata and the centroids
     dist_mat <- quoted_call(
         clus@family@dist,
         x = newdata,

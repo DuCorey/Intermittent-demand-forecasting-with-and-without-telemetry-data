@@ -121,3 +121,24 @@ make_xts <- function(data)
         return(as.xts(ts(data)))
     }
 }
+
+
+filter_year <- function(serie, time_scale, year = "2016")
+{
+    if (is.null(serie)) {
+        return(NULL)
+    }
+
+    time_scale <- match.arg(time_scale, c("weeks", "days", "months"))
+
+    #' Filter time series for a specific year
+    filt <- serie[format(index(serie), "%Y") == as.character(year)]
+    n_periods <- switch(time_scale,
+                        weeks = 52, days = 365, months = 12)
+
+    if (nrow(filt) >= n_periods) {
+        return(filt)
+    } else {
+        return(NULL)
+    }
+}
