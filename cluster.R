@@ -5,6 +5,7 @@
 #' packages
 library(parallel)
 library(scales)
+library(kableExtra)
 
 #' imports
 source("data.R")
@@ -15,7 +16,7 @@ source("utils.R")
 source("forecast.R")
 source("ADIDA.R")
 source("error.R")
-source("dtwclust")
+source("dtwclust.R")
 
 #' functions
 client_cluster_con_serie <- function(client, time_scale)
@@ -378,7 +379,7 @@ clus_shapes <- function(clus, method, con_shape_series)
                                  function(x) mean(sapply(con_shape_series[clus@cluster == x], sd)))
 
                ## Apply the un_z_score to each centroid using the clus_mean and clus_sd
-               centroids <- del_centroids(clus)
+               centroids <- con_centroids(clus)
                shapes <- lapply(clus_ids,
                                 function(x) un_z_score(centroids[[x]], clus_mean[[x]], clus_sd[[x]]))
            }, "medoid" = {
@@ -393,7 +394,7 @@ clus_shapes <- function(clus, method, con_shape_series)
                ##' Method 4 - The original centroid
                ## Simply return the originaly calculated centroid.
                ## Useful when there is no data preprocessing step in the clustering
-               shapes <- con_centroids(cluster)
+               shapes <- con_centroids(clus)
            })
 
     return(shapes)
