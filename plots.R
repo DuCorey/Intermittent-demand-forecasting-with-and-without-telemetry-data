@@ -76,3 +76,23 @@ plot_series_error <- function(error_model, main = NULL, xlab = NULL, ylab = NULL
     agg <- get_error_model(error_model, "AGG")
     plot_mult_xts(con, sma, crost, agg, main = main, xlab = xlab, ylab = ylab, legend.names = legend.names, col = col)
 }
+
+
+plot_pred_error <- function(model, ind)
+{
+    #' Plot predictions  model for the ind customer from the model object
+    preds <- model$pred[[ind]]
+
+    asact_err <- model$pred[[ind]]$asact$err
+    clus_err <- model$pred[[ind]]$clus$err
+    cum_err <- model$pred[[ind]]$cum$err
+
+    cat(sprintf("RMSE Errors \r
+ASACT = %s\r
+Clus = %s\r
+ADIDA = %s\n",
+asact_err, clus_err, cum_err))
+
+    plot_mult_xts(preds$real, preds$asact$pred, preds$clus$pred, preds$cum$pred,
+                  legend.names = c("Real", "ASACT", "Clus", "Cum"))
+}
