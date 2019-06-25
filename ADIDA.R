@@ -109,7 +109,7 @@ series_agg <- function(series, func = mean)
     #' For time series each time period will be have the func applied to each
     #' Also works for multivariate series where each variable will be aggregated
     if (is_multivariate(series)) {
-        L <- ncols[[1]]
+        L <- sapply(series, NCOL)[[1]]
         res <- vector("list", L)
 
         for (i in seq_len(L)) {

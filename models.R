@@ -420,7 +420,7 @@ model$shape$method, model$shape$series))
         } else if (model$centroid == "pam") {
             centroid_f_quote <- "pam"
         } else if (model$centroid == "mean") {
-            centroid_f_quote <- mean_series
+            centroid_f_quote <- quote(mean_series)
         } else {
             stop("Unsupported hierarchical centroid function given.\n")
         }
@@ -461,7 +461,7 @@ model$shape$method, model$shape$series))
         control$distmat <- dist_mat
     }
 
-    if (model$clustering == "hierarchical" & centroid_f_quote == "pam") {
+    if (model$clustering == "hierarchical" & model$centroid == "pam") {
         ## When using hierarhical clustering with "pam", that method is the
         ## default for the function call. So we don't include it in the
         ## substitute and eval.
