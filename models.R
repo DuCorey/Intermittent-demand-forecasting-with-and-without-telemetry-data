@@ -322,6 +322,22 @@ sum_con_pred_error <- function(err)
 }
 
 
+print_con_pred_error <- function(err)
+{
+    clus <- sapply(err, function(x) x$clus$err)
+    asact <- sapply(err, function(x) x$asact$err)
+    cum <- sapply(err, function(x) x$cum$err)
+
+    structure(
+        list(
+            clus = clus,
+            asact = asact,
+            cum = cum
+        )
+    )
+}
+
+
 series_id <- function(series)
 {
     #' Return an identification string for the series type
@@ -561,7 +577,6 @@ series_id(model$series), model$k, model$shape$method, model$shape$series))
     structure(
         list(
             model = model,
-            cluster = cluster,
             distmat = dist_mat,
             preds = preds,
             total_error = total_error
