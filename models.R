@@ -415,10 +415,12 @@ model$shape$method, model$shape$series))
     if (model$clustering == "hierarchical") {
         if (model$centroid == "shape_extraction") {
             centroid_f_quote <- quote(shape_extraction)
-        } else if (model$centroid == "DBA") {
+        } else if (model$centroid == "dba") {
             centroid_f_quote <- quote(dba)
         } else if (model$centroid == "pam") {
             centroid_f_quote <- "pam"
+        } else if (model$centroid == "mean") {
+            centroid_f_quote <- mean_series
         } else {
             stop("Unsupported hierarchical centroid function given.\n")
         }
