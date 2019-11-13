@@ -3,6 +3,7 @@
 #' author: Corey Ducharme / corey.ducharme@polymtl.ca
 
 #' pacakges
+library("zoo")
 
 #' imports
 source("error.R")
@@ -10,7 +11,7 @@ source("series.R")
 source("dtwclust.R")
 
 #'functions
-aggregate <- function(data, binsize, FUN = sum, ...)
+aggregate <- function(data, binsize, FUN = sum)
 {
     rem <- length(data) %% binsize
     if (rem != 0) {
@@ -18,13 +19,13 @@ aggregate <- function(data, binsize, FUN = sum, ...)
         data <- trim_ts(data, rem, "start")
     }
 
-    agg <- rollapply(data, binsize, FUN, by=binsize)
+    agg <- zoo::rollapply(data, binsize, FUN, by=binsize)
     agg <- agg[!is.na(agg)]
     return(agg)
 }
 
 
-disaggregate_weighted <-  function(data, weights, ...)
+disaggregate_weighted <-  function(data, weights)
 {
     #' Implementation of weighted disaggregation of time series
 
@@ -88,18 +89,16 @@ ADIDA <- function(data, binsize, type)
 
     rem <- length(data) %% binsize
 
-    res <- aggregate(data, binsize)
+    agg <- aggregate(data, binsize)
     res <- switch(type,
-                  SMA = disaggregate_sma(res, binsize),
-                  EMA = disaggregate_ema(res, binsize))
-    res <- xts(res, order.by = index(data)[(rem + 1):length(data)])
+                  SMA = disaggregate_sma(agg, binsize),
+                  EMA = disaggregate_ema(agg, binsize))
+
+    if (is.xts(data)) {
+        res <- xts(res, order.by = index(data)[(rem + 1):length(data)])
+    }
+
     return(res)
-}
-
-
-mean_series <- function(series)
-{
-    return(series_agg(series, func = mean))
 }
 
 
@@ -107,7 +106,7 @@ series_agg <- function(series, func = mean)
 {
     #' Aggregate the series based on the function.
     #' For time series each time period will be have the func applied to each
-    #' Also works for multivariate series where each variable will be aggregated
+    #' Also works for multivariate series where each variable will be aggregated seperately
     if (is_multivariate(series)) {
         L <- sapply(series, NCOL)[[1]]
         res <- vector("list", L)
@@ -129,10 +128,16 @@ series_agg <- function(series, func = mean)
 
     ## If the series as xts, we reformat the output to be xts
     if (is.xts(series[[1]])) {
-        res %<>% as.xts(., order.by = index(series[[1]]))
+        res <- as.xts(res, order.by = index(series[[1]]))
     }
 
     return(res)
+}
+
+
+mean_series <- function(series)
+{
+    return(series_agg(series, func = mean))
 }
 
 
