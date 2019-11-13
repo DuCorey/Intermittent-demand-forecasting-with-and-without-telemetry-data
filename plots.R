@@ -4,17 +4,30 @@
 
 #' packages
 library(ggplot2)
+library(gridExtra)
 
 #' source
+source("cluster.R")
 
 #' functions
 cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
 
-plot_cluster_series <- function(clus, series)
+plot_cluster_series <- function(x, series, preproc = FALSE, centroids = FALSE, ...)
 {
     #' Given the series, will plot then based on the orders of the cluster
     #' object.
-    plot(clus, type = "series", series = series)
+
+    if (preproc) {
+        #' Preprocess the series data with the cluster function
+        series <- clus_preproc(series, x)
+    }
+
+    if (centroids) {
+        #' Force the centroids of the cluster to be mv
+        x@centroids <- lapply(x@centroids, function(x) cbind(x, numeric(length(x))))
+    }
+
+    plot(x, type = "sc", series = series, ...)
 }
 
 
@@ -95,4 +108,173 @@ asact_err, clus_err, cum_err))
 
     plot_mult_xts(preds$real, preds$asact$pred, preds$clus$pred, preds$cum$pred,
                   legend.names = c("Real", "ASACT", "Clus", "Cum"))
+}
+
+
+plot_vertical_clus <- function(x, series = NULL, grob = FALSE)
+{
+    #' Plot the multivariate series of a cluter object stacked vertically
+    clus <- seq_len(x@k)
+    centroids <- x@centroids
+
+    if (!is.null(series)) {
+        data <- tslist(series)
+    } else {
+        if (length(x@datalist) < 1L)
+            stop("Provided object has no data. Please provide the data manually.") # nocov
+        data <- x@datalist
+    }
+
+                                        # helper values (lengths() here, see issue #18 in GitHub)
+    L1 <- lengths(data)
+    L2 <- lengths(centroids)
+                                        # timestamp consistency
+                                        # transform to data frames
+    dfm <- reshape2::melt(data)
+    dfcm <- reshape2::melt(centroids)
+
+                                        # time, cluster and colour indices
+    color_ids <- integer(x@k)
+
+    dfm_tcc <- mapply(x@cluster, L1, USE.NAMES = FALSE, SIMPLIFY = FALSE,
+                      FUN = function(clus, len) {
+                          t <- rep(seq_len(len/2), 2)
+                          cl <- rep(clus, len)
+                          color <- rep(color_ids[clus], len)
+                          color_ids[clus] <<- color_ids[clus] + 1L
+                          data.frame(t = t, cl = cl, color = color)
+                      })
+    dfcm_tc <- mapply(1L:x@k, L2, USE.NAMES = FALSE, SIMPLIFY = FALSE,
+                      FUN = function(clus, len) {
+                          t <- rep(seq_len(len/2), 2)
+                          cl <- rep(clus, len)
+                          data.frame(t = t, cl = cl)
+                      })
+
+                                        # bind
+    dfm <- data.frame(dfm, do.call(rbind, dfm_tcc, TRUE))
+    dfcm <- data.frame(dfcm, do.call(rbind, dfcm_tc, TRUE))
+                                        # make factor
+    dfm$cl <- factor(dfm$cl)
+    dfcm$cl <- factor(dfcm$cl)
+    dfm$color <- factor(dfm$color)
+
+    cluster_members_labeller <- function(cl)
+    {
+        members <- percent(sum(x@cluster == cl)/length(x@cluster))
+        return(paste("Cluster", cl, "-", members, "mem.", sep = " "))
+    }
+
+    single_plot <- function(cl)
+    {
+        gg <- ggplot2::ggplot(data.frame(t = integer(),
+                                         variable = factor(),
+                                         value = numeric(),
+                                         cl = factor(),
+                                         color = factor()),
+                              ggplot2::aes_string(x = "t",
+                                                  y = "value",
+                                                  group = "L1"))
+
+                                        # add series appropriate
+
+        gg <- gg + ggplot2::geom_line(data = dfm[dfm$cl == cl, ], aes_string(colour = "color")) +
+            ggplot2::scale_color_hue(h.start = 180)
+
+        ## Random colors
+        ## n  <- length(levels(dfm$color))
+        ## hues <- hue_pal()(n)[order(sample(1:n, n))]
+
+        ## gg <- gg + ggplot2::scale_color_manual(values = hues)
+
+        ## Centroid
+        gg <- gg + ggplot2::geom_line(data = dfcm[dfcm$cl == cl, ],
+                                      linetype = "solid",
+                                      size = 1.5,
+                                      colour = "black",
+                                      alpha = 0.5)
+
+        ## Label
+        foo <- cluster_members_labeller(cl)
+        names(foo) <- cl
+
+
+        gg <- gg +
+            ggplot2::theme_bw() +
+            ggplot2::theme(legend.position = "none",
+                           axis.title.x = ggplot2::element_blank(),
+                           axis.title.y = ggplot2::element_blank(),
+                           panel.spacing.y = ggplot2::unit(0, "lines")) +
+            ggplot2::facet_grid(Var2 ~ cl, labeller = ggplot2::labeller(cl = foo, Var2 = ggplot2::label_value)) +
+            ggplot2::guides(colour = FALSE)
+
+        return(gg)
+    }
+
+    plot_list <- lapply(clus, single_plot)
+
+    if (grob) {
+        return(gridExtra::arrangeGrob(grobs = plot_list, ncol = 3, nrow = 3, bottom = "t", left = "Normalized value"))
+    } else {
+        gridExtra::grid.arrange(grobs = plot_list, ncol = 3, nrow = 3, bottom = "t", left = "Normalized value")
+    }
+}
+
+plot_vertical_cluster_series <- function(x, series, preproc = FALSE, grob = FALSE)
+{
+    #' Given the series, will plot then based on the orders of the cluster
+    #' object.
+
+    if (preproc) {
+        #' Preprocess the series data with the cluster function
+        series <- clus_preproc(series, x)
+    }
+
+    plot_vertical_clus(x, series = series, grob = grob)
+}
+
+
+plot_mv_centroids <- function(x)
+{
+    #' Superimpose the multivariate centroids for a cluster object
+    clus <- seq_len(x@k)
+
+    centroids <- x@centroids
+
+    L2 <- lengths(centroids)
+                                        # timestamp consistency
+                                        # transform to data frames
+
+    dfcm <- reshape2::melt(centroids)
+
+                                        # time, cluster and colour indices
+    dfcm_tc <- mapply(1L:x@k, L2, USE.NAMES = FALSE, SIMPLIFY = FALSE,
+                      FUN = function(clus, len) {
+                          t <- rep(seq_len(len/2), 2)
+                          cl <- rep(clus, len)
+                          data.frame(t = t, cl = cl)
+                      })
+
+                                        # bind
+    dfcm <- data.frame(dfcm, do.call(rbind, dfcm_tc, TRUE))
+                                        # make factor
+    dfcm$cl <- factor(dfcm$cl)
+
+    ## Create a labeller which returns the percentage of members in each cluster
+    cluster_members_labeller <- function(cl)
+    {
+        members <- percent(sum(x@cluster == cl)/length(x@cluster))
+        paste("Cluster", cl, "-", members, "mem.", sep = " ")
+    }
+
+    foo <- sapply(seq_len(x@k), cluster_members_labeller)
+    names(foo) <- seq_len(x@k)
+
+    gg <- ggplot2::ggplot(dfcm, ggplot2::aes(x = t, y = value, group = interaction(Var2, cl), colour = Var2)) +
+        ggplot2::geom_line() +
+        theme(legend.position="top") +
+        ggplot2::labs(y = "Normalised Value", colour = "") +
+        ggplot2::facet_wrap(~cl, scales = "free_y", labeller = ggplot2::labeller(cl = foo))
+
+    plot(gg)
 }
