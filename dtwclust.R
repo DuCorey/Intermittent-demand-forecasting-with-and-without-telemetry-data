@@ -13,7 +13,8 @@ has_dots <- getFromNamespace("has_dots", "dtwclust")
 subset_dots <- getFromNamespace("subset_dots", "dtwclust")
 
 
-#' quoted_call does not exist in the dtwclust so we just copied it from him
+#' quoted_call does not exist in the dtwclust environment so we just copied it
+#' from the github https://github.com/asardaes/dtwclust/blob/master/R/UTILS-utils.R#L138
 quoted_call <- function(fun, ..., dots = NULL)
 {
     #' do.call but always quoted
@@ -121,8 +122,8 @@ plot.TSClusters <- function(x, y, ...,
         data <- x@datalist
     }
 
-                                        # centroids consistency
-    check_consistency(centroids <- x@centroids, "vltslist")
+    ## No more centroids consistency or else we can't plot them with NAs
+    centroids <- x@centroids
 
                                         # force same length for all multivariate series/centroids in the same cluster by
                                         # adding NAs
@@ -208,7 +209,7 @@ plot.TSClusters <- function(x, y, ...,
     if (type %in% c("sc", "centroids")) {
         if (length(list(...)) == 0L)
             gg <- gg + ggplot2::geom_line(data = dfcm[dfcm$cl %in% clus, ],
-                                          linetype = "dashed",
+                                          linetype = "solid",
                                           size = 1.5,
                                           colour = "black",
                                           alpha = 0.5)
@@ -220,7 +221,9 @@ plot.TSClusters <- function(x, y, ...,
         ggdata <- data.frame(cl = rep(1L:x@k, each = (nc - 1L)),
                              vbreaks = as.numeric(1L:(nc - 1L) %o% sapply(centroids, NROW)))
         gg <- gg + ggplot2::geom_vline(data = ggdata[ggdata$cl %in% clus, , drop = FALSE],
-                                       colour = "black", linetype = "longdash",
+                                       colour = "black",
+                                       linetype = "32",
+                                       size = 1.5,
                                        ggplot2::aes_string(xintercept = "vbreaks"))
     }
 
@@ -255,17 +258,37 @@ plot.TSClusters <- function(x, y, ...,
         gg <- gg + do.call(ggrepel::geom_label_repel, labels, TRUE)
     }
 
+    ## Create a labeller which returns the number of members in each cluster
+    cluster_members_labeller <- function(cl)
+    {
+        members <- percent(sum(x@cluster == cl)/length(x@cluster))
+        paste("Cluster", cl, "-", members, "mem.", sep = " ")
+    }
+
+    foo <- sapply(seq_len(x@k), cluster_members_labeller)
+    names(foo) <- seq_len(x@k)
+
+
                                         # add facets, remove legend, apply kinda black-white theme
     gg <- gg +
-        ggplot2::facet_wrap(~cl, scales = "free_y") +
+        ggplot2::theme_bw() +
+        ggplot2::theme(legend.position = "none") + ## Hard remove the legend
+        ggplot2::facet_wrap(~cl, scales = "free_y", labeller = ggplot2::labeller(cl = foo)) +
         ggplot2::guides(colour = FALSE) +
-        ggplot2::theme_bw()
+        ## ggplot2::geom_text(data = dat_text,
+        ##                    mapping = aes(x = -Inf, y = -Inf, label = label),
+        ##                    hjust   = -0.1,
+        ##                    vjust   = -1
+        ##                    )
+        ggplot2::annotate("text", label = "Con   Del", x = 360, y = Inf, size = 3, vjust = 2)
+
+
 
                                         # labs
-    if (!is.null(labs.arg)) # nocov start
-        gg <- gg + ggplot2::labs(labs.arg)
-    else
-        gg <- gg + ggplot2::labs(title = title_str)
+    ## if (!is.null(labs.arg)) # nocov start
+    ##     gg <- gg + ggplot2::labs(labs.arg)
+    ## else
+    ##     gg <- gg + ggplot2::labs(title = title_str)
 
                                         # plot without warnings in case I added NAs for multivariate cases
     if (plot) suppressWarnings(graphics::plot(gg))
