@@ -115,6 +115,18 @@ cluster_data <- function(cvd, source, time_scale)
 }
 
 
+replace_ksmooth_clus <- function(data)
+{
+    #' Replace the smooth consumption with a ksmooth
+    con_orig <- data$con$orig
+    con_smooth <- filter_year(ksmooth_xts(con_orig, kernel = "normal", bandwidth = 50), "days")
+
+    data$con$smooth <- con_smooth
+
+    return(data)
+}
+
+
 ## get_clus_DPs <- function(clus)
 ## {
 ##     return(sapply(clus$cvd, function(x) x$DP))
@@ -179,8 +191,23 @@ mv_serie <- function(con, del, pad = 0)
 
 mv_series <- function(clus_data, pad = NULL)
 {
-    #' Produce multivariate series from the cluster_data
     return(lapply(clus_data, function(x) mv_serie(x$con$smooth, x$del$smooth, pad)))
+}
+
+
+mv_clus_series <- function(clus_data, series_type)
+{
+    #' Produce multivariate or univarite series from the cluster_data
+    ## Provide the univariate series if requested
+    dels <- switch(series_type$del,
+                   "smooth" = del_clus_series(clus_data, "smooth"),
+                   "raw" = data_orig_dels(clus_data))
+    cons <- switch(series_type$con,
+                  "smooth" = con_clus_series(clus_data, "smooth"),
+                  "raw" = data_orig_con(clus_data))
+    series <- mapply(function(x,y) mv_serie(x, y, series_type$pad), cons, dels,
+                     SIMPLIFY = FALSE)
+    return(series)
 }
 
 
@@ -238,23 +265,14 @@ data_orig_con <- function(data)
 ## Looks probable as the distance methods accept variable lenghts
 my_clustering <- function(clus_data, series_type, k, trace = TRUE, ...)
 {
-    series_type <- match.arg(series_type, c("mv", "del"))
-    switch(series_type,
-           "mv" = {
-               series <- mv_series(clus_data)
-           }, "del" = {
-               ## Convert to numeric probably
-               series <- del_clus_series(clus_data, "smooth")
-           })
+    #' Fetch the series for clustering
+    series <- mv_clus_series(clus_data, series_type)
 
     if (k != 1) {
         clus <- dtwclust::tsclust(series,
                                   trace = trace,
                                   k = k,
                                   ...)
-                      ## args = tsclust_args(dist = list(window.size = 2,
-        ##                                 step.pattern = symmetric1)))
-
 
         ## Add the original series in the object's attributes
         attributes(clus)$orig_data <- series
@@ -324,6 +342,13 @@ clus_calc_distance_matrix <- function(newdata, clus, centroids)
     )
 
     return(dist_mat)
+}
+
+
+clus_centroid <- function(newdata, clus)
+{
+    #' Apply the clusters centroid function to the new data
+    return(clus@family@allcent(newdata))
 }
 
 
@@ -552,7 +577,7 @@ cluster_table <- function(c1, c2)
 {
     #' Return the cross tabulation table between the clusters c1 and c2
     #' Return the greatest elements in the table and their weight in the cluster
-    orig <- table(con_clus@cluster, del_clus@cluster)
+    orig <- table(c1@cluster, c2@cluster)
 
     dels <- apply(orig, 1, function(x) paste("D", which.max(x), "-", scales::percent(max(x)/sum(x)), sep = ""))
     dels <- matrix(dels, ncol = 1)
@@ -751,6 +776,3 @@ if (FALSE) {  # Prevents it from running when sourcing the file
 
     mv_fuzzy_con_prediction(clus, new_dels, "mean", con_shape_series)[[1]]
 }
-
-## args = tsclust_args(dist = list(window.size = 2,
-##                                 step.pattern = symmetric1)

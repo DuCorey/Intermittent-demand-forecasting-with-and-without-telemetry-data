@@ -887,12 +887,14 @@ get_client_correlation <- function(client)
 
 get_client_safety_level <- function(client, a = 0.2)
 {
+    #' Apply over all tanks if the client has multiple and sum the values
     return(a * sum(sapply(client$tank, function(x) x$max.level)))
 }
 
 
 get_client_safety_level_unit <- function(client)
 {
+    #' Apply over all tanks if the client has multiple
     return(sapply(client$tank, function(x) x$max.level.unit))
 }
 
