@@ -11,11 +11,11 @@ library(xts)
 convert_xts_weekly <- function(serie)
 {
     if (is(serie, "data.frame")) {
-        serie <- as.xts(serie[[2]], order.by = as.Date(serie[[1]]))
+        serie <- as.xts(serie[[2]], order.by = as.Date(serie[[1]], tz = tz(serie[[1]][[1]])))
     }
 
     res <- xts::apply.weekly(serie, sum)
-    attr(res, 'frequency') <- 365.25/7
+    attr(res, 'frequency') <- 52
 
     ## Hard setting endpoints to be a full week
     ## myTs <- clus_tel_day$del$orig[[5]]
@@ -30,11 +30,11 @@ convert_xts_weekly <- function(serie)
 convert_xts_daily <- function(serie)
 {
     if (is(serie, "data.frame")) {
-        serie <- as.xts(serie[[2]], order.by = as.Date(serie[[1]]))
+        serie <- as.xts(serie[[2]], order.by = as.Date(serie[[1]], tz = tz(serie[[1]][[1]])))
     }
 
     res <- xts::apply.daily(serie, sum)
-    attr(res, 'frequency') <- c(7, 365.25)
+    attr(res, 'frequency') <- 7
     return(res)
 }
 
@@ -42,7 +42,7 @@ convert_xts_daily <- function(serie)
 convert_xts_monthly <- function(serie)
 {
     if (is(serie, "data.frame")) {
-        serie <- as.xts(serie[[2]], order.by = as.Date(serie[[1]]))
+        serie <- as.xts(serie[[2]], order.by = as.Date(serie[[1]], tz = tz(serie[[1]][[1]])))
     }
 
     res <- xts::apply.monthly(serie, sum)
