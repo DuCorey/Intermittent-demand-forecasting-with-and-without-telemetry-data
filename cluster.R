@@ -93,7 +93,7 @@ cluster_data <- function(cvd, source, time_scale)
 
     print("Preprocessing consumption data")
     con <- mclapply(con_orig,
-                    pryr::partial(filter_year, time_scale = time_scale) %c% my_ets,
+                    pryr::partial(filter_year, time_scale = time_scale) %c% ets_smooth_xts,
                     mc.cores = 8)
 
     ## Combine both truth series of not null values for del and con
@@ -671,7 +671,7 @@ if (FALSE) {  # Prevents it from running when sourcing the file
     #' Comparing the smoothing on the consumption data
     foo <- clus_tel_day[[1]]$con$smooth
     bar <- clus_tel_day[[1]]$con$orig %>%
-        my_ets(.) %>%
+        ets_smooth_xts(.) %>%
         filter_year(., "days")
     all.equal(foo, bar)
 

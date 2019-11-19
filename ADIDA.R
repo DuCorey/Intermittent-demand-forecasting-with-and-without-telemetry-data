@@ -4,6 +4,7 @@
 
 #' pacakges
 library("zoo")
+library("forecast")
 
 #' imports
 source("error.R")
@@ -11,11 +12,14 @@ source("series.R")
 source("dtwclust.R")
 
 #'functions
-aggregate <- function(data, binsize, FUN = sum)
+aggregate_temp <- function(data, binsize, FUN = sum)
 {
+    #' Temporal aggreqation of time series
+    #' The series are temporaly agregated starting from the end as such some starting can be loss
+
+    ## Cut down the length so that we capture all of the end
     rem <- length(data) %% binsize
     if (rem != 0) {
-        warning("Data length is not a multiple of binsize. You will lose some starting data when rolling.")
         data <- trim_ts(data, rem, "start")
     }
 
@@ -89,7 +93,7 @@ ADIDA <- function(data, binsize, type)
 
     rem <- length(data) %% binsize
 
-    agg <- aggregate(data, binsize)
+    agg <- aggregate_temp(data, binsize)
     res <- switch(type,
                   SMA = disaggregate_sma(agg, binsize),
                   EMA = disaggregate_ema(agg, binsize))
@@ -141,7 +145,7 @@ mean_series <- function(series)
 }
 
 
-cum_adida <- function(serie, max_bin, type = "SMA", agg_func = mean)
+cum_ADIDA <- function(serie, max_bin, type = "SMA", agg_func = mean)
 {
     #' Return the cumulative ADIDA model for the serie
     #' Results are cumulated using the agg_func and the ADIDA model is done
