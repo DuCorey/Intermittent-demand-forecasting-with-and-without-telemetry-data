@@ -30,9 +30,12 @@ ets_smooth_xts <- function(data, ...)
     ## Convert data to numeric since the method don't like to take xts input
     smooth <- fitted(forecast::ets(as.numeric(data), ...))
 
-        xts(., order.by = index(data))
-
-    attr(res, 'frequency') <- frequency(data)
+    if (is.xts(data)) {
+        res <- xts(smooth, order.by = index(data))
+        attr(res, 'frequency') <- frequency(data)
+    } else {
+        res <- smooth
+    }
 
     return(res)
 }
