@@ -71,9 +71,9 @@ simple_croston <- function(data, alpha)
 }
 
 
-my_croston <- function(data, ...)
+croston_smooth <- function(data, ...)
 {
-    #' Wrapper function over tsintermittent::crost
+    #' Smooth the data using tsintermittent::crost
     if (sum(data != 0) < 2) {
         warning("Croston requires a minimum of 2 non-zero values. Returning NULL.")
         return(NULL)
@@ -95,14 +95,24 @@ my_croston <- function(data, ...)
 }
 
 
-ASACT <- function(serie, agg, ...)
+croston_predict <- function(data, h, ...)
+{
+    #' Forecast the data using tsintermittent::crost
+    ## Convert data to numeric since the methods don't like to take xts input
+    res <- tsintermittent::crost(as.numeric(data), h = h, init = "mean", type = "sba", ...)
+
+    return(res)
+}
+
+
+ASACT <- function(serie, time, ...)
 {
     #' Implementation of ASACT forecast by (Murray et al. 2018)
-    agg <- match.arg(agg, c("daily", "weekly", "monthly"))
+    time <- match.arg(time, c("daily", "weekly", "monthly"))
 
-    serie %<>% my_croston(.)
+    serie <- croston_smooth(serie)
 
-    switch(agg, weekly = {
+    switch(time, weekly = {
         serie <- convert_xts_weekly(serie)
     }, daily = {
         serie <- convert_xts_daily(serie)
