@@ -224,15 +224,62 @@ best_end_matching <- function(df)
 peak_tel_at_del <- function(del, tel)
 {
     #' Return the peak telemetry during a refill starting at time of delivery
-    j <- which(tel$datetime == del)
-    i <- j+1
-    while(tel$level[[i]] > tel$level[[j]]) {
-        j <- i
-        i <- i+1
-    }
-    return(tel$level[[j]])
-}
+    #' This code only works on the processed telemetry data
+    start <- which(tel$datetime == del)  # Start of the day
+    i <- start
+    j <- i+1
+    counter <- 1  # counter so we don't go over a whole day during our search
 
+    if (tel$level[[i]] >= tel$level[[j]]) {
+        ## The level is decreasing at the start of the day.
+        ## 51 50 49 70 90 80
+        ## i  j
+        ## The refil was done later in the day.
+        ## Let's loop to find to find when the refil starts.
+        while (tel$level[[i]] >= tel$level[[j]] && counter < 25) {
+            i <- j
+            j <- i+1
+            counter <- counter+1
+            ## Happens if the delivery was done at exactly 00:00:00 the start of the day
+            ## 50 | 80 79 78 77 ...
+            ##      i  j
+            ## Our first loop would continue until it found a next peak maybe days later
+        }
+        ## This loops ends when we find the beginning of the delivery
+        ## but not necessarely the max level during the delivery
+        ## This can happen if for example it goes 51 50 49 70 90 80
+        ## We will break with pointers at               i  j
+    }
+
+    if (tel$level[[i]] <= tel$level[[j]]) {
+        ## We are at a delivery
+        ## Either we started the day with a delivery or we got here from the
+        ## previous loop.
+        ## 51 50 49 70 90 80
+        ##       i  j
+
+        ## Keep searching until we find the max
+        ## Max is found when the following level is smaller
+        ## when this inequality doesn't hold
+        while (tel$level[[i]] <= tel$level[[j]]) {
+            i <- j
+            j <- i+1
+        }
+        ## Break happens
+        ## 51 50 49 70 90 80
+        ##             i  j
+    }
+    if (counter < 25) {
+        ## Our peak is now at pointer i
+        peak <- tel$level[[i]]
+    } else {
+        ## We hit the counter we went a whole day with decreasing amounts
+        ## the first day was the peak refill
+        peak <- tel$level[[start]]
+    }
+
+    return(peak)
+}
 
 #' main
 if (FALSE) {  # Prevent it from being run when sourcing the file
