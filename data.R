@@ -310,7 +310,7 @@ add_missing_days <- function(serie)
     end <- round(serie[[1]][[nrow(serie)]], units = "days")
     days <- data.frame(datetime=seq(start, end, by = "days"))
     serie <- merge(serie, days, by=c("datetime"), all = TRUE) %>%
-        imputeTS::na.replace(., fill = 0)
+        imputeTS::na_replace(., fill = 0)
     return(serie)
 }
 
