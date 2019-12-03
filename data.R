@@ -306,11 +306,11 @@ add_missing_hours <- function(serie)
 add_missing_days <- function(serie)
 {
     #' Add missing days to serie
-    start <- round(serie[[1]][[1]], units = "days")
-    end <- round(serie[[1]][[nrow(serie)]], units = "days")
-    days <- data.frame(datetime=seq(start, end, by = "days"))
-    serie <- merge(serie, days, by=c("datetime"), all = TRUE) %>%
-        imputeTS::na_replace(., fill = 0)
+    start <- round(serie[[1]][[1]], units = "day")
+    end <- round(serie[[1]][[nrow(serie)]], units = "day")
+    days <- data.frame(datetime=seq(start, end, by = "DSTday"))
+    serie <- merge(serie, days, by=c("datetime"), all = TRUE)
+    serie <- imputeTS::na_replace(serie, fill = 0)
     return(serie)
 }
 
