@@ -10,8 +10,7 @@ library(MAPA)
 #' imports
 
 #' functions
-forward_propagation <- function(x)
-{
+forward_propagation <- function(x) {
     #' Forward propagation of non zero values as if they were fluxes
     spread <- x
     flux <- NA
@@ -38,8 +37,7 @@ forward_propagation <- function(x)
 }
 
 
-simple_croston <- function(data, alpha)
-{
+simple_croston <- function(data, alpha) {
     #' Simplest implementation of Croston's method to smooth intermittent time series
     n <- length(data)
     nzd <- which(data != 0)
@@ -71,8 +69,7 @@ simple_croston <- function(data, alpha)
 }
 
 
-croston_smooth <- function(data, ...)
-{
+croston_smooth <- function(data, ...) {
     #' Smooth the data using tsintermittent::crost
     if (sum(data != 0) < 2) {
         warning("Croston requires a minimum of 2 non-zero values. Returning NULL.")
@@ -95,18 +92,26 @@ croston_smooth <- function(data, ...)
 }
 
 
-croston_predict <- function(data, h, ...)
-{
-    #' Forecast the data using tsintermittent::crost
-    ## Convert data to numeric since the methods don't like to take xts input
-    res <- tsintermittent::crost(as.numeric(data), h = h, init = "mean", type = "sba", ...)
+croston <- function(x, f.type = c("SBA.base", "SBA.opt"), ...) {
+    f.type <- match.arg(f.type, c("SBA.base", "SBA.opt"))
+    x <- as.numeric(x)
 
-    return(res)
+    model <- switch(f.type,
+                    SBA.base = tsintermittent::crost(x, h = 0, w = 0.05,
+                                                     type = "sba",
+                                                     init.opt = FALSE, ...),
+                    SBA.opt = tsintermittent::crost(x, h = 0, type = "sba", ...))
+    model$x <- x
+    model$type <- f.type
+
+    structure(
+        model,
+        class = "croston"
+    )
 }
 
 
-ASACT <- function(serie, time, ...)
-{
+ASACT <- function(serie, time, ...) {
     #' Implementation of ASACT forecast by (Murray et al. 2018)
     time <- match.arg(time, c("daily", "weekly", "monthly"))
 
@@ -128,8 +133,7 @@ ASACT <- function(serie, time, ...)
 }
 
 
-my_mapa <- function(data, agg, ...)
-{
+my_mapa <- function(data, agg, ...) {
     #' Wrapper over mapa
     #' Don't use the parallel implementation of the function it is very poorly done
     smoothed <- MAPA::mapa(ts(data), ppy = agg, fh = 0, display = 0, conf.lvl=NULL, type = "ets", ...)$infor
@@ -143,8 +147,7 @@ my_mapa <- function(data, agg, ...)
 }
 
 
-crost_decomp <- function(x)
-{
+crost_decomp <- function(x) {
     #' Perform the croston decomposition of the time series
     decomp <- tsintermittent::crost.decomp(x, init = "naive")
     decomp$demand %<>% as.numeric %>%
@@ -155,8 +158,7 @@ crost_decomp <- function(x)
 }
 
 
-tukey_decomp_table <- function(x)
-{
+tukey_decomp_table <- function(x) {
     decomps <- lapply(x, crost_decomp)
     tukey_demand <- lapply(decomps, function(x) fivenum(as.numeric(x$demand)))
     tukey_int <- lapply(decomps, function(x) fivenum(as.numeric(x$interval)))
@@ -220,8 +222,7 @@ tukey_decomp_table <- function(x)
 }
 
 
-intermittent_categorisation <- function(data, ...)
-{
+intermittent_categorisation <- function(data, ...) {
     #' Intermittent time series categorisation
 
     ## Convert the incoming data into a dataframe for the function. Fill with NA's if they aren't the same size
