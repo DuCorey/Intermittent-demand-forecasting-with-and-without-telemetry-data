@@ -98,7 +98,8 @@ ADIDA <- function(data, binsize, ffun, h = binsize, disagfun = disaggregate_sma)
     ## forecast to be on the disaggregated series
     ## The ceiling determines the minimum amount of forecasting we need on the
     ## aggregated series so that we have enough after disaggregating
-    fcast <- result_forecast(forecast(ffun(agg), ceiling(h/binsize)))
+    fmodel <- ffun(agg)
+    fcast <- result_forecast(forecast(fmodel, ceiling(h/binsize)))
 
     ## C) Disaggregate
     disag <- disagfun(as.matrix(fcast), binsize)
@@ -113,6 +114,7 @@ ADIDA <- function(data, binsize, ffun, h = binsize, disagfun = disaggregate_sma)
             fitted = data,
             binsize = binsize,
             h = h,
+            fmodel = fmodel,
             ffun = ffun,
             disagfun = disagfun
         ),
@@ -135,7 +137,12 @@ forecast.ADIDA <- function(obj, h, ...) {
     } else if (h <= length(obj$disag)) {
         res <- head(obj$disag, h)
     } else {
-        return(forecast(ADIDA(obj$fitted, obj$binsize, obj$ffun, h = h, obj$disagfun), h))
+        ## Continue the forecast using the save forecasting model
+        fcast <- result_forecast(forecast(obj$fmodel, ceiling(h/obj$binsize)))
+        ## Disaggregate
+        disag <- obj$disagfun(as.matrix(fcast), obj$binsize)
+        ## Final result
+        res <- head(disag, n = h)
     }
 
     structure(
@@ -164,8 +171,8 @@ compact_forecast.ADIDA <- function(obj) {
     structure(
         list(
             binsize = obj$binsize,
-            ffun = obj$ffun,
-            disagfun = obj$disagfun
+            disagfun = obj$disagfun,
+            fmodel = compact_forecast(obj$fmodel)
         ),
         class = "ADIDAcompact"
     )
@@ -173,7 +180,20 @@ compact_forecast.ADIDA <- function(obj) {
 
 
 forecast.ADIDAcompact <- function(obj, x, h) {
-    return(forecast(ADIDA(x, binsize = obj$binsize, ffun = obj$ffun, disagfun = obj$disafgun), h))
+    #' How we forecast a comapcted ADIDA object as fast as we can
+    ## Aggregate the data, as this is the data being sent to the compacted
+    ## forecasting model
+    agg <- aggregate_temp(x, obj$binsize)
+
+    ## Use the compacted forecasting model to speed up
+    fcast <- result_forecast(forecast(obj$fmodel, agg, ceiling(h/obj$binsize)))
+
+    ## Disaggregate
+    disag <- obj$disagfun(as.matrix(fcast), obj$binsize)
+
+    ## Final result
+    res <- head(disag, n = h)
+    return(res)
 }
 
 
@@ -272,12 +292,14 @@ if (FALSE) {
     series_agg(list(a, b))
 
     foo <- generate_xts(50)
-    bar <- ADIDA(foo, 10, ffun = partial(croston, f.type="SBA.opt"), h = 7)
+    bar <- ADIDA(foo, 10, ffun = partial(croston, f.type="SBA.opt"))
     forecast(bar, h = 8)
-    forecast(compact_forecast(bar), foo, 8)
+    system.time(forecast(bar, h = 20))
+
+    cux <- compact_forecast(bar)
+    system.time(forecast(cux, foo, 20))
 
     forecast(bar, h = 20)
-
     update(bar, generate_xts(60))
 
 }
