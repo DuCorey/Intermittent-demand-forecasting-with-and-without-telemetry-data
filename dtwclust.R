@@ -15,8 +15,7 @@ subset_dots <- getFromNamespace("subset_dots", "dtwclust")
 
 #' quoted_call does not exist in the dtwclust environment so we just copied it
 #' from the github https://github.com/asardaes/dtwclust/blob/master/R/UTILS-utils.R#L138
-quoted_call <- function(fun, ..., dots = NULL)
-{
+quoted_call <- function(fun, ..., dots = NULL) {
     #' do.call but always quoted
     do.call(fun, enlist(..., dots = dots), quote = TRUE)
 }

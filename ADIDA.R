@@ -12,8 +12,7 @@ source("series.R")
 source("dtwclust.R")
 
 #'functions
-aggregate_temp <- function(data, binsize, FUN = sum)
-{
+aggregate_temp <- function(data, binsize, FUN = sum) {
     #' Temporal aggreqation of time series
     #' The series are temporaly agregated starting from the end as such some starting can be loss
 
@@ -29,8 +28,7 @@ aggregate_temp <- function(data, binsize, FUN = sum)
 }
 
 
-disaggregate_weighted <-  function(data, weights)
-{
+disaggregate_weighted <-  function(data, weights) {
     #' Implementation of weighted disaggregation of time series
 
     cur_agg_lvl <- unique(diff(index(data)))
@@ -47,24 +45,21 @@ disaggregate_weighted <-  function(data, weights)
 }
 
 
-disaggregate_sma <- function(data, binsize)
-{
+disaggregate_sma <- function(data, binsize) {
     weights <- simpleweights(binsize)
     res <- disaggregate_weighted(data, weights)
    return(res)
 }
 
 
-disaggregate_ema <- function(data, binsize)
-{
+disaggregate_ema <- function(data, binsize) {
     weights <- emaweights(binsize)
     res <- disaggregate_weighted(data, weights)
     return(res)
 }
 
 
-emaweights <- function(m)
-{
+emaweights <- function(m) {
     alpha <- 2/(m+1)
     i <- 1:m
     sm <- sum((alpha*(1-alpha)^(1-i)))
@@ -73,21 +68,18 @@ emaweights <- function(m)
 }
 
 
-wmaweights <- function(m)
-{
+wmaweights <- function(m) {
     weights <- (1:m)/sum(1:m)
     return(rev(weights))
 }
 
 
-simpleweights <- function(m)
-{
+simpleweights <- function(m) {
     return(rep(1/m, m))
 }
 
 
-ADIDA <- function(data, binsize, type)
-{
+ADIDA <- function(data, binsize, type) {
     #' Implementation of ADIDA framework
     type <- match.arg(type, c("SMA", "EMA"))
 
@@ -106,8 +98,7 @@ ADIDA <- function(data, binsize, type)
 }
 
 
-series_agg <- function(series, func = mean)
-{
+series_agg <- function(series, func = mean) {
     #' Aggregate the series based on the function.
     #' For time series each time period will be have the func applied to each
     #' Also works for multivariate series where each variable will be aggregated seperately
@@ -139,14 +130,12 @@ series_agg <- function(series, func = mean)
 }
 
 
-mean_series <- function(series)
-{
+mean_series <- function(series) {
     return(series_agg(series, func = mean))
 }
 
 
-cum_ADIDA <- function(serie, max_bin, type = "SMA", agg_func = mean)
-{
+cum_ADIDA <- function(serie, max_bin, type = "SMA", agg_func = mean) {
     #' Return the cumulative ADIDA model for the serie
     #' Results are cumulated using the agg_func and the ADIDA model is done
     #' with following the max_bin and the type
@@ -160,8 +149,7 @@ cum_ADIDA <- function(serie, max_bin, type = "SMA", agg_func = mean)
 }
 
 
-opt_agg <- function(con, del, model_f)
-{
+opt_agg <- function(con, del, model_f) {
     #' Determine the optinal aggregation level (bin) for an ADIDA model
     #' If we knew the form of the original series that we are converting (AR, MA)
     #' the optimal aggregation level can be found analytically refer to paper ...
