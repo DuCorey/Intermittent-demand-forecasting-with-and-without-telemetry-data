@@ -31,7 +31,7 @@ aggregate_temp <- function(data, binsize, FUN = sum) {
 disaggregate_weighted <-  function(data, weights) {
     #' Implementation of weighted disaggregation of time series
 
-    cur_agg_lvl <- unique(diff(index(data)))
+    ## cur_agg_lvl <- unique(diff(index(data)))
 
     ## if (length(cur_agg_lvl) != 1) {
     ##     stop("Aggregation level is inconsistent accross the serie.")
@@ -79,22 +79,101 @@ simpleweights <- function(m) {
 }
 
 
-ADIDA <- function(data, binsize, type) {
-    #' Implementation of ADIDA framework
-    type <- match.arg(type, c("SMA", "EMA"))
+ADIDA <- function(data, binsize, ffun, h = binsize, disagfun = disaggregate_sma) {
+    #' Implementation of ADIDA model
+    #' A) Aggregate
+    #' B) Forecast
+    #' C) Disaggregate
+    #' data : the data for the forecast
+    #' binsize : the aggregation binsize
+    #' ffun : the forecasting function
+    #' h : the forecasting horizon
+    #' disagfun: the disaggregation function
 
-    rem <- length(data) %% binsize
-
+    ## A) Aggregate
     agg <- aggregate_temp(data, binsize)
-    res <- switch(type,
-                  SMA = disaggregate_sma(agg, binsize),
-                  EMA = disaggregate_ema(agg, binsize))
 
-    if (is.xts(data)) {
-        res <- xts(res, order.by = index(data)[(rem + 1):length(data)])
+    ## B) Forecast
+    ## We forecast on the aggregated serie, but we want the horizon of the
+    ## forecast to be on the disaggregated series
+    ## The ceiling determines the minimum amount of forecasting we need on the
+    ## aggregated series so that we have enough after disaggregating
+    fcast <- result_forecast(forecast(ffun(agg), ceiling(h/binsize)))
+
+    ## C) Disaggregate
+    disag <- disagfun(as.matrix(fcast), binsize)
+
+    ## Final result
+    res <- head(disag, n = h)
+
+    structure(
+        list(
+            frc.out = res,
+            disag = disag,
+            fitted = data,
+            binsize = binsize,
+            h = h,
+            ffun = ffun,
+            disagfun = disagfun
+        ),
+        class = "ADIDA"
+    )
+}
+
+
+## Final match up of the lengths
+## rem <- length(data) %% binsize  to match up length
+## if (is.xts(data)) {
+##     res <- xts(res, order.by = index(data)[(rem + 1):length(data)])
+## }
+
+
+forecast.ADIDA <- function(obj, h, ...) {
+    #' Forecast the ADIDA object
+    if (h == obj$h) {
+        res <- obj$frc.out
+    } else if (h <= length(obj$disag)) {
+        res <- head(obj$disag, h)
+    } else {
+        return(forecast(ADIDA(obj$fitted, obj$binsize, obj$ffun, h = h, obj$disagfun), h))
     }
 
-    return(res)
+    structure(
+        list(
+            out = res
+        ),
+        class = "ADIDAforecast"
+    )
+}
+
+
+update.ADIDA <- function(obj, newdata, ...) {
+    #' How we want to update an ADIDA object with new data
+    #' We have to recalculate the whole thing
+    #' Technically there is some edge cases where if the new data is identical
+    #' to the old data on a subset and the new total length mod the binsize is 0
+    #' we could not have to recalculate all the aggregation again, but that part is fast
+    #' so I'm not going to do it.
+    return(ADIDA(newdata, obj$binsize, obj$ffun, obj$h, obj$disagfun))
+}
+
+
+compact_forecast.ADIDA <- function(obj) {
+    #' Compact representation of the ADIDA object.
+    #' This is all we need to recreate the original object given the same data
+    structure(
+        list(
+            binsize = obj$binsize,
+            ffun = obj$ffun,
+            disagfun = obj$disagfun
+        ),
+        class = "ADIDAcompact"
+    )
+}
+
+
+forecast.ADIDAcompact <- function(obj, x, h) {
+    return(forecast(ADIDA(x, binsize = obj$binsize, ffun = obj$ffun, disagfun = obj$disafgun), h))
 }
 
 
@@ -191,4 +270,14 @@ if (FALSE) {
     a <- generate_xts(5)
     b <- generate_xts(5)
     series_agg(list(a, b))
+
+    foo <- generate_xts(50)
+    bar <- ADIDA(foo, 10, ffun = partial(croston, f.type="SBA.opt"), h = 7)
+    forecast(bar, h = 8)
+    forecast(compact_forecast(bar), foo, 8)
+
+    forecast(bar, h = 20)
+
+    update(bar, generate_xts(60))
+
 }
