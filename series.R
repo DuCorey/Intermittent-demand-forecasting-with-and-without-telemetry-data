@@ -8,8 +8,7 @@ library(xts)
 #' imports
 
 #' functions
-convert_xts_weekly <- function(serie)
-{
+convert_xts_weekly <- function(serie) {
     if (is(serie, "data.frame")) {
         serie <- as.xts(serie[[2]], order.by = as.Date(serie[[1]], tz = tz(serie[[1]][[1]])))
     }
@@ -27,8 +26,7 @@ convert_xts_weekly <- function(serie)
 }
 
 
-convert_xts_daily <- function(serie)
-{
+convert_xts_daily <- function(serie) {
     if (is(serie, "data.frame")) {
         serie <- as.xts(serie[[2]], order.by = as.Date(serie[[1]], tz = tz(serie[[1]][[1]])))
     }
@@ -39,8 +37,7 @@ convert_xts_daily <- function(serie)
 }
 
 
-convert_xts_monthly <- function(serie)
-{
+convert_xts_monthly <- function(serie) {
     if (is(serie, "data.frame")) {
         serie <- as.xts(serie[[2]], order.by = as.Date(serie[[1]], tz = tz(serie[[1]][[1]])))
     }
@@ -51,8 +48,7 @@ convert_xts_monthly <- function(serie)
 }
 
 
-trim_ts <- function(serie, n, how = "both")
-{
+trim_ts <- function(serie, n, how = "both") {
     #' Remove n values in a time series object.
     #' Series can be trimed from the start, the end and both.
 
@@ -72,15 +68,13 @@ trim_ts <- function(serie, n, how = "both")
 }
 
 
-merge_xts_list <- function(l)
-{
+merge_xts_list <- function(l) {
     return(Reduce(merge, l[2:length(l)], l[[1]]))
 }
 
 
-match_ends <- function(a, b, how)
-{
-    #' Takes two time series and returns them so that both ends match
+match_ends <- function(a, b, how) {
+    #' Takes two xts and returns them so that both ends match
     #' It cuts off the extra in the larger time series.
     how <- match.arg(how, c("start", "end"))
 
@@ -98,22 +92,19 @@ match_ends <- function(a, b, how)
 }
 
 
-xts_range <- function(start, end)
-{
+xts_range <- function(start, end) {
     #' Create an xts range from start and end dates
     return(paste(start, end, sep = "::"))
 }
 
 
-generate_xts <- function(len)
-{
+generate_xts <- function(len) {
     #' Generate a random xts series of length len
     return(xts(runif(len), seq(from = Sys.Date(), by = 1, length.out = len)))
 }
 
 
-make_xts <- function(data)
-{
+make_xts <- function(data) {
     #' Attempt to convert the data into xts data
     if (is.list(data)) {
         return(lapply(data, make_xts))
@@ -123,8 +114,7 @@ make_xts <- function(data)
 }
 
 
-filter_year <- function(serie, time_scale, year = "2016")
-{
+filter_year <- function(serie, time_scale, year = "2016") {
     if (is.null(serie)) {
         return(NULL)
     }
