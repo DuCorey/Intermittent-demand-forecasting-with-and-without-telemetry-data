@@ -111,6 +111,47 @@ croston <- function(x, f.type = c("SBA.base", "SBA.opt"), ...) {
 }
 
 
+forecast.croston <- function(obj, h, ...) {
+    #' Since we already have the croston object, we don't need to redo any of
+    #' the optimisations in the crosotn method
+    out <- tsintermittent::crost(obj$x, h = h, w = obj$weights, init = obj$initial,
+                                 type = obj$model, init.opt = FALSE, ...)
+    out$h <- h
+
+    structure(
+        out,
+        class = "crostonforecast"
+    )
+}
+
+
+update.croston <- function(obj, newdata, ...) {
+    #' How we want to update a croston object with new data
+    #' We have to recalculate all the parameters
+    return(croston(newdata, obj$type, ...))
+}
+
+
+compact_forecast.croston <- function(obj) {
+    #' Compact representation of the croston object.
+    #' This is all we need to recreate the original object given the same data
+    structure(
+        list(
+            weights = obj$weights,
+            initial = obj$initial,
+            model = obj$model
+        ),
+        class = "crostoncompact"
+    )
+}
+
+
+forecast.crostoncompact <- function(obj, x, h) {
+    obj$x <- x
+    return(forecast.croston(obj, h))
+}
+
+
 ASACT <- function(serie, time, ...) {
     #' Implementation of ASACT forecast by (Murray et al. 2018)
     time <- match.arg(time, c("daily", "weekly", "monthly"))
@@ -232,4 +273,12 @@ intermittent_categorisation <- function(data, ...) {
 
     res <- tsintermittent::idclass(data, ...)
     return(res)
+}
+
+if (FALSE) {
+    foo <- generate_xts(50)
+    bar <- croston(foo)
+    result_forecast(forecast(bar, 10))
+    result_forecast(forecast(compact_forecast(bar), foo, 10))
+
 }
