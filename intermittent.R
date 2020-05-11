@@ -70,32 +70,40 @@ simple_croston <- function(data, alpha) {
 }
 
 
-croston_smooth <- function(data, ...) {
-    #' Smooth the data using tsintermittent::crost
-    if (sum(data != 0) < 2) {
-        warning("Croston requires a minimum of 2 non-zero values. Returning NULL.")
-        return(NULL)
-    }
-    ## Issue with Croston is that it has to begin with a non 0 value
+croston_smooth <- function(object, ...) {
+    UseMethod("croston_smooth")
+}
 
-    ## Convert data to numeric since the methods don't like to take xts input
-    smoothed <- tsintermittent::crost(as.numeric(data), h = 0, init = "mean",
-                                      init.opt = TRUE, type = "sba", ...)$frc.in
-
+croston_smooth.croston <- function(obj, ...) {
+    #' Smooth the data using croston
+    #' Pass it a croston object with fitted data
+    smoothed <- obj$frc.in
     ## Refit the time series so the times add match up again.
     ## Croston being an exponential smoothing method will lose an observation
-    smoothed_xts <- smoothed[!is.na(smoothed)] %>%
-        xts(., order.by = tail(index(data), -1))
+    ## Smoothing always loses the first point of data
+    if (is.xts(obj$fitted)) {
+        smoothed <- smoothed[!is.na(smoothed)] %>%
+            xts(., order.by = tail(index(obj$fitted), -1))
 
-    attr(smoothed_xts, 'frequency') <- frequency(data)
+        attr(smoothed, 'frequency') <- frequency(obj$fitted)
+    } else {
+        smoothed <- tail(smoothed, -1)
+    }
 
-    return(smoothed_xts)
+    return(smoothed)
 }
 
 
-croston <- function(x, f.type = c("SBA.base", "SBA.opt"), ...) {
+croston_smooth.crostoncompact <- function(obj, x) {
+    #' Since the object passed is the compact croston, we resmooth the data
+    #' using the computed parameters
+    return(croston_smooth.croston(forecast.crostoncompact(obj, x, 0)))
+}
+
+
+croston <- function(data, f.type = c("SBA.base", "SBA.opt"), ...) {
     f.type <- match.arg(f.type, c("SBA.base", "SBA.opt"))
-    x <- as.numeric(x)
+    x <- as.numeric(data)
 
     model <- switch(f.type,
                     SBA.base = tsintermittent::crost(x, h = 0, w = 0.05,
@@ -148,13 +156,23 @@ compact_forecast.croston <- function(obj) {
 }
 
 
+compact_forecast.crostoncompact <- function(obj) {
+    return(obj)
+}
+
+
 forecast.crostoncompact <- function(obj, x, h) {
     obj$x <- x
     return(forecast.croston(obj, h))
 }
 
 
-ASACT <- function(serie, time, ...) {
+result_forecast.crostonforecast <- function(fcast) {
+    #' Return the numerical forecast result only
+    return(as.numeric(fcast$frc.out))
+}
+
+
 ASACT <- function(data, agg.time, ffun, h = agg.time, smooth_model = NULL) {
     #' Implementation of ASACT forecast by (Murray et al. 2018)
     #' Initial data is the low level time series
