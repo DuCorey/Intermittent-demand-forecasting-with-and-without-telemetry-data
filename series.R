@@ -59,10 +59,10 @@ trim_ts <- function(serie, n, how = "both") {
         return(serie)
     }
     if (how %in% c("start", "both")) {
-        serie <- serie[-c(1:n),]
+        serie <- tail(serie, -n)
     }
     if (how %in% c("end", "both")) {
-        serie <- serie[-c((length(serie)-(n-1)):length(serie)),]
+        serie <- head(serie, -n)
     }
     return(serie)
 }
