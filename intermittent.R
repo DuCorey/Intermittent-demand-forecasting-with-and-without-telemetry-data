@@ -8,6 +8,7 @@ library(xts)
 library(MAPA)
 
 #' imports
+source("ADIDA.R")
 
 #' functions
 forward_propagation <- function(x) {
@@ -103,6 +104,7 @@ croston <- function(x, f.type = c("SBA.base", "SBA.opt"), ...) {
                     SBA.opt = tsintermittent::crost(x, h = 0, type = "sba", ...))
     model$x <- x
     model$type <- f.type
+    model$fitted <- data
 
     structure(
         model,
@@ -153,25 +155,137 @@ forecast.crostoncompact <- function(obj, x, h) {
 
 
 ASACT <- function(serie, time, ...) {
+ASACT <- function(data, agg.time, ffun, h = agg.time, smooth_model = NULL) {
     #' Implementation of ASACT forecast by (Murray et al. 2018)
-    time <- match.arg(time, c("daily", "weekly", "monthly"))
+    #' Initial data is the low level time series
+    #' A) Smooth
+    #' B) Aggregate
+    #' C) Forecast
+    #' D) Disaggreate to return to the original time scale
+    #' Methods B), C) and D) are essentially the ADIDA method
 
-    serie <- croston_smooth(serie)
+    ## A) Smooth with croston
+    if (is.null(smooth_model)) {
+        smooth_model <- croston(data, "SBA.opt")
+    }
 
-    switch(time, weekly = {
-        serie <- convert_xts_weekly(serie)
-    }, daily = {
-        serie <- convert_xts_daily(serie)
-    }, monthly = {
-        serie <- convert_xts_monthly(serie)
-    })
+    ## Use the passed compacted smooth model
+    smooth <- croston_smooth(smooth_model, data)
 
-    ## if (trim) {
-    ##     serie %<>% trim_ts(., n = 1)
-    ## }
+    ## D), C), D) using ADIDA
+    res <- ADIDA(smooth, agg.time, ffun, h, disaggregate_sma)
 
-    return(serie)
+
+    structure(
+        list(
+            frc.out = res$frc.out,
+            smooth = smooth,
+            smooth.model = smooth_model,
+            disag = res$disag,
+            fitted = data,
+            agg.time = agg.time,
+            h = h,
+            ffun = ffun,
+            fmodel = res$fmodel
+        ),
+        class = "ASACT"
+    )
 }
+
+
+forecast.ASACT <- function(obj, h, ...) {
+    #' Forecasting the ASACT is simply forecasting the ADIDA part since we keep
+    #' the smoothed data in the fitted object
+    ## We need to pass these missing parameters to the forecast.ADIDA method
+    obj$binsize <- obj$agg.time
+    obj$disagfun <- disaggregate_sma
+
+    res <- forecast.ADIDA(obj, h, ...)
+
+
+    structure(
+        list(
+            out = res$out
+        ),
+        class = "ASACTforecast"
+    )
+}
+
+
+update.ASACT <- function(obj, newdata, ...) {
+    return(ASACT(newdata, obj$agg.time, obj$ffun, obj$h, ...))
+}
+
+
+compact_forecast.ASACT <- function(obj) {
+    #' Compact representation of the ADIDA object.
+    #' This is all we need to recreate the original object given the same data
+    structure(
+        list(
+            agg.time = obj$agg.time,
+            smooth.model = compact_forecast(obj$smooth.model),
+            fmodel = compact_forecast(obj$fmodel)
+        ),
+        class = "ASACTcompact"
+    )
+}
+
+
+forecast.ASACTcompact <- function(obj, x, h) {
+    #' How we forecast a comapcted ASACT object as fast as we can
+    #' Equivalent to doing the ADDIAcompact forecast after smoothing the data
+    ## Smooth the data using the saved values in the smooth.model
+    smooth <- croston_smooth(obj$smooth.model, x)
+
+    ## Need to send set these attributes for the ADIDAcompact forecast method
+    obj$binsize <- obj$agg.time
+    obj$disagfun <- disaggregate_sma
+
+    res <- forecast.ADIDAcompact(obj, smooth, h)
+
+    return(res)
+}
+
+
+result_forecast.ASACTforecast <- function(fcast) {
+    return(as.numeric(fcast$out))
+}
+
+
+## ASACT_smooth <- function(x, time, weight = "EQW", f.type = "ets") {
+##     time <- match.arg(time, c("weekly", "monthly"))
+##     weight <- match.arg(weight, c("EQW"))
+##     f.type <- match.arg(f.type, c("naive", "SBA.base", "SBA.opt", "ets"))
+##     ## Aggregate using ASACT
+##     agg <- ASACT(x, time)
+
+##     ## Forecast the aggregated serie 1 step ahead
+##     f1 <- switch(f.type,
+##                  naive = forecast::naive(as.ts(agg), 1)$mean,
+##                  ets = predict(forecast::ets(as.ts(agg)), 1)$mean,
+##                  SBA.base = croston_predict(agg, 1, w = 0.05, init.opt = FALSE)$frc.out,
+##                  SBA.opt = croston_predict(agg, 1, init.opt = TRUE, nop = 2)$frc.out)
+
+##     ## Disaggregate
+##     ## The disagergation amount depends on the length of the object 30 or 31 days for months
+##     ## 7 days for a week
+##     if (time == "weekly") {
+##         disag <- disaggregate_sma(f1, 7)
+##     } else {
+##         ## Determine the number of days in the forecasted month for the disag
+##         days <- lubridate::days_in_month(end(apply.monthly(bar, sum)) + 1)
+##         disag <- disaggregate_sma(f1, days)
+##     }
+
+##     structure(
+##         list(
+##             model = paste("ASACT", f.type, weight, sep = " - "),
+##             time = time,
+##             out = disag
+##         ),
+##         class = "MyForecast"
+##     )
+## }
 
 
 my_mapa <- function(data, agg, ...) {
@@ -280,5 +394,21 @@ if (FALSE) {
     bar <- croston(foo)
     result_forecast(forecast(bar, 10))
     result_forecast(forecast(compact_forecast(bar), foo, 10))
+
+    ## ASACT model
+    data <- generate_xts(50)
+
+    foo <- ASACT(data, 7, ets)
+    forecast(foo, 10)
+
+    cux <- croston(data, "SBA.opt")
+    bar <- ASACT(data, 7, ets, smooth_model = cux)
+    forecast(bar, 10)
+
+    bar <- ADIDA(croston_smooth(croston(data, "SBA.opt")), 7, ets)
+    forecast(bar, 10)
+
+    cux <- compact_forecast(foo)
+    forecast(cux, x = data, h = 10)
 
 }
