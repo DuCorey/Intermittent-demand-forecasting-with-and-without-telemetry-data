@@ -197,6 +197,11 @@ forecast.ADIDAcompact <- function(obj, x, h) {
 }
 
 
+result_forecast.ADIDAforecast <- function(fcast) {
+    return(as.numeric(fcast$out))
+}
+
+
 series_agg <- function(series, func = mean) {
     #' Aggregate the series based on the function.
     #' For time series each time period will be have the func applied to each
