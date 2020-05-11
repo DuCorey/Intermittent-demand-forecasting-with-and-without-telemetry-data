@@ -221,8 +221,7 @@ best_end_matching <- function(df)
 }
 
 
-peak_tel_at_del <- function(del, tel)
-{
+peak_tel_at_del <- function(del, tel) {
     #' Return the peak telemetry during a refill starting at time of delivery
     #' This code only works on the processed telemetry data
     start <- which(tel$datetime == del)  # Start of the day
@@ -230,13 +229,19 @@ peak_tel_at_del <- function(del, tel)
     j <- i+1
     counter <- 1  # counter so we don't go over a whole day during our search
 
-    if (tel$level[[i]] >= tel$level[[j]]) {
+    ## We have a -3 here in the check this avoids stopping when reaching small
+    ## fluctuations which may still persist even after cleaning the data.
+    ##        50 50.2 49.8
+    ## diff   -0.2  0.4
+    ## a >= 0 is equivalent to tel$level[[i]] >= tel$level[[j]]
+
+    if (tel$level[[i]] - tel$level[[j]] >= -3) {
         ## The level is decreasing at the start of the day.
         ## 51 50 49 70 90 80
         ## i  j
         ## The refil was done later in the day.
         ## Let's loop to find to find when the refil starts.
-        while (tel$level[[i]] >= tel$level[[j]] && counter < 25) {
+        while (tel$level[[i]] - tel$level[[j]] >= -3 && counter < 25) {
             i <- j
             j <- i+1
             counter <- counter+1
