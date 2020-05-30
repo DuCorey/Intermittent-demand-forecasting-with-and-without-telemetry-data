@@ -272,9 +272,40 @@ plot_mv_centroids <- function(x)
 
     gg <- ggplot2::ggplot(dfcm, ggplot2::aes(x = t, y = value, group = interaction(Var2, cl), colour = Var2)) +
         ggplot2::geom_line() +
-        theme(legend.position="top") +
+        ggplot2::theme(legend.position="top") +
         ggplot2::labs(y = "Normalised Value", colour = "") +
         ggplot2::facet_wrap(~cl, scales = "free_y", labeller = ggplot2::labeller(cl = foo))
 
     plot(gg)
+}
+
+
+pareto_plot <- function(data, binsize, xlab = NULL, ylab = NULL) {
+    #' Return a pareto plot while binning the x data togther by binsize
+    res <- data[order(data, decreasing = TRUE)]
+    myDF <- data.frame(count = sapply(split(res, ceiling(seq_along(res)/52)), sum))
+    myDF$cust_group <- factor(seq(from = 1, to = length(n_dels)/52))
+    myDF$cumulative <- cumsum(myDF$count)
+
+    ggplot2::ggplot(myDF, ggplot2::aes(x=myDF$cust_group)) +
+        ggplot2::geom_bar(ggplot2::aes(y=myDF$count), stat="identity") +
+        ggplot2::geom_point(ggplot2::aes(y=myDF$cumulative), pch = 16, size = 3) +
+        ggplot2::geom_path(ggplot2::aes(y=myDF$cumulative, group = 1), lty = 3, size = 0.9) +
+        ggplot2::theme_bw() +
+        ggplot2::labs(x = xlab, y = ylab)
+}
+
+
+pareto_curve <- function(data, xlab = NULL, ylab = NULL) {
+    res <- data[order(data, decreasing = TRUE)]
+    myDF <- data.frame(res = res)
+    myDF$cumulativey <- cumsum(myDF$res)/sum(data)
+    myDF$cumulativex <- index(data)/length(data)
+
+    ggplot2::ggplot(myDF, ggplot2::aes(x=myDF$cumulativex)) +
+        ggplot2::geom_path(ggplot2::aes(y=myDF$cumulativey, group = 1), linetype = "solid", size = 1) +
+        ggplot2::theme_bw() +
+        ggplot2::labs(x = xlab, y = ylab) +
+        scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+        scale_x_continuous(labels = scales::percent)
 }
