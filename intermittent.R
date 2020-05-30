@@ -306,18 +306,71 @@ result_forecast.ASACTforecast <- function(fcast) {
 ## }
 
 
-my_mapa <- function(data, agg, ...) {
-    #' Wrapper over mapa
-    #' Don't use the parallel implementation of the function it is very poorly done
-    smoothed <- MAPA::mapa(ts(data), ppy = agg, fh = 0, display = 0, conf.lvl=NULL, type = "ets", ...)$infor
+MAPA <- function(data, agg, ...) {
+    mapafit <- MAPA::mapaest(as.ts(data), ppy = agg, type = "ets", model = "ZZZ", ...)
 
-    smoothed_xts <- smoothed[!is.na(smoothed)] %>%
-        xts(., order.by = tail(index(data), -agg))
 
-    attr(smoothed_xts, 'frequency') <- frequency(data)
-
-    return(smoothed_xts)
+    structure(
+        list(
+            fitted = as.ts(data),
+            mapafit = mapafit,
+            agg = agg
+        ),
+        class = "MAPA"
+    )
 }
+
+
+forecast.MAPA <- function(obj, h, ...) {
+    fcast <- mapafor(obj$fitted, obj$mapafit, fh = h, ifh = 0, comb = "w.mean")
+
+    structure(
+        fcast,
+        class = "MAPAforecast"
+    )
+}
+
+
+update.MAPA <- function(obj, newdata, ...) {
+    return(MAPA(newdata, obj$agg))
+}
+
+
+compact_forecast.MAPA <- function(obj) {
+    structure(
+        list(
+            mapafit = obj$mapafit
+        ),
+        class = "MAPAcompact"
+    )
+}
+
+
+forecast.MAPAcompact <- function(obj, x, h, ...) {
+    #' How we forecast a compacted MAPA object
+    fcast <- mapafor(x, obj$mapafit, fh = h, ifh = 0, comb = "w.mean")
+
+    structure(
+        fcast,
+        class = "MAPAforecast"
+    )
+}
+
+
+result_forecast.MAPAforecast <- function(obj) {
+    return(as.numeric(obj$outfor))
+}
+
+
+## my_mapa <- function(data, agg, h, ...) {
+##     #' These results do not match up perfectly to MAPA
+##     #' Although it is about twice as fast as the MAPA::mapa
+##     fors <- lapply(1:7, function(x) {
+##         result_forecast(forecast(ADIDA(data, x, ets, h), h))
+##     })
+
+##     return(series_agg(fors))
+## }
 
 
 crost_decomp <- function(x) {
@@ -428,5 +481,13 @@ if (FALSE) {
 
     cux <- compact_forecast(foo)
     forecast(cux, x = data, h = 10)
+
+    ## MAPA
+    foo <- MAPA(data, 7)
+    forecast(foo, 7)
+    result_forecast(forecast(foo, 7))
+    compact_forecast(foo)
+    forecast(compact_forecast(foo), data, 7)
+    result_forecast(forecast(compact_forecast(foo), data, 7))
 
 }
