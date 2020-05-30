@@ -8,6 +8,15 @@ library(xts)
 #' imports
 
 #' functions
+convert_xts <- function(serie) {
+    if (is(serie, "data.frame")) {
+        serie <- as.xts(serie[[2]], order.by = as.POSIXct(serie[[1]], tz = tz(serie[[1]][[1]])))
+    }
+
+    return(serie)
+}
+
+
 convert_xts_weekly <- function(serie) {
     if (is(serie, "data.frame")) {
         serie <- as.xts(serie[[2]], order.by = as.Date(serie[[1]], tz = tz(serie[[1]][[1]])))
@@ -26,12 +35,12 @@ convert_xts_weekly <- function(serie) {
 }
 
 
-convert_xts_daily <- function(serie) {
+convert_xts_daily <- function(serie, FUN = sum) {
     if (is(serie, "data.frame")) {
         serie <- as.xts(serie[[2]], order.by = as.Date(serie[[1]], tz = tz(serie[[1]][[1]])))
     }
 
-    res <- xts::apply.daily(serie, sum)
+    res <- xts::apply.daily(serie, FUN)
     attr(res, 'frequency') <- 7
     return(res)
 }
@@ -69,6 +78,7 @@ trim_ts <- function(serie, n, how = "both") {
 
 
 merge_xts_list <- function(l) {
+    #' Merge multiple xts series contianed in a list
     return(Reduce(merge, l[2:length(l)], l[[1]]))
 }
 
@@ -115,6 +125,7 @@ make_xts <- function(data) {
 
 
 filter_year <- function(serie, time_scale, year = "2016") {
+    #' Return a series with only the specified year of data
     if (is.null(serie)) {
         return(NULL)
     }
