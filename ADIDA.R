@@ -180,7 +180,7 @@ compact_forecast.ADIDA <- function(obj) {
 
 
 forecast.ADIDAcompact <- function(obj, x, h) {
-    #' How we forecast a comapcted ADIDA object as fast as we can
+    #' How we forecast a compacted ADIDA object as fast as we can
     ## Aggregate the data, as this is the data being sent to the compacted
     ## forecasting model
     agg <- aggregate_temp(x, obj$binsize)
@@ -193,7 +193,13 @@ forecast.ADIDAcompact <- function(obj, x, h) {
 
     ## Final result
     res <- head(disag, n = h)
-    return(res)
+
+    structure(
+        list(
+            out = res
+        ),
+        class = "ADIDAforecast"
+    )
 }
 
 
@@ -302,7 +308,7 @@ if (FALSE) {
     system.time(forecast(bar, h = 20))
 
     cux <- compact_forecast(bar)
-    system.time(forecast(cux, foo, 20))
+    result_forecast(forecast(cux, foo, 20))
 
     forecast(bar, h = 20)
     update(bar, generate_xts(60))
