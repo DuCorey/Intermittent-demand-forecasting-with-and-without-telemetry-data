@@ -7,27 +7,7 @@
 #' imports
 
 #' functions
-lapply_pb <- function(X, FUN, ...) {
-    env <- environment()
-    pb_Total <- length(X)
-    counter <- 0
-    pb <- txtProgressBar(min = 0, max = pb_Total, style = 3)
-
-    ## wrapper around FUN
-    wrapper <- function(...){
-        curVal <- get("counter", envir = env)
-        assign("counter", curVal +1 ,envir=env)
-        setTxtProgressBar(get("pb", envir=env), curVal +1)
-        FUN(...)
-    }
-    res <- lapply(X, wrapper, ...)
-    close(pb)
-    res
-}
-
-
-filtered_substitute <- function(expr, env)
-{
+filtered_substitute <- function(expr, env) {
     #' Works exactly like substitute but removes any arguments from the expression
     #' that are NULL from the environment. Currently it works only with
     #' The expression must be quoted to be passed properly.
