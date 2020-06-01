@@ -25,15 +25,13 @@ source("matching.R")
 blacklist <- c("70835")
 
 
-read_csv_skip_second_line <- function(file)
-{
+read_csv_skip_second_line <- function(file) {
     data <- read.csv(file, header = TRUE, stringsAsFactors = FALSE)
     return(data[-1,])
 }
 
 
-fix_raw_delivery_column_names <- function(data)
-{
+fix_raw_delivery_column_names <- function(data) {
     colnames(data)[which(names(data) == "ExternalDeliveryNote")] <- "ExtDeliveryNote"
     return(data)
 }
@@ -41,8 +39,7 @@ fix_raw_delivery_column_names <- function(data)
 
 ### data objects
 ## Delivery data
-DeliveryData <- function()
-{
+DeliveryData <- function() {
     sources <- c("../data/internship data/Reports/2015",
                  "../data/internship data/Reports/2016",
                  "../data/internship data/Reports")
@@ -95,20 +92,17 @@ DeliveryData <- function()
 }
 
 
-print.DeliveryData <- function(x, ...)
-{
+print.DeliveryData <- function(x, ...) {
     invisible(x)
 }
 
 
-summary.DeliveryData <- function(x, ...)
-{
+summary.DeliveryData <- function(x, ...) {
     summary(x$data)
 }
 
 
-head.DeliveryData <- function(x, ...)
-{
+head.DeliveryData <- function(x, ...) {
     head(x$data)
 }
 
@@ -127,8 +121,7 @@ head.DeliveryData <- function(x, ...)
 ## }
 
 
-Delivery <- function(df, dp_num)
-{
+Delivery <- function(df, dp_num) {
     data <- subset(df, select = c("DispatchZoneCode",
                                   "DispatchCenterCode",
                                   "DeliveringDispatchZoneCode",
@@ -180,8 +173,7 @@ Delivery <- function(df, dp_num)
 }
 
 ## Telemetry data
-TelemetryData <- function()
-{
+TelemetryData <- function() {
     files <- c("../data/internship data/VW_LEVEL_AND_PRESSURE_IM.csv")
 
     data <- read.csv(files, header = TRUE, stringsAsFactors=FALSE)
@@ -208,27 +200,23 @@ TelemetryData <- function()
 }
 
 
-print.TelemetryData <- function(x, ...)
-{
+print.TelemetryData <- function(x, ...) {
     invisible(x)
 }
 
 
-summary.TelemetryData <- function(x, ...)
-{
+summary.TelemetryData <- function(x, ...) {
     summary(x$data)
 }
 
 
-head.TelemtryData <- function(x, ...)
-{
+head.TelemtryData <- function(x, ...) {
     head(x$data)
 }
 
 
 ## Tank level data
-Tank <- function(tank, tank_info_sub_tank, telemetry_subset, sitename)
-{
+Tank <- function(tank, tank_info_sub_tank, telemetry_subset, sitename) {
     ## Tank information
     product <- tank_info_sub_tank[, "Product"]
     max_level <- tank_info_sub_tank[, "MaxLevel"]
@@ -280,8 +268,7 @@ Tank <- function(tank, tank_info_sub_tank, telemetry_subset, sitename)
 }
 
 
-remove_fluctuations <- function(serie)
-{
+remove_fluctuations <- function(serie) {
     #' Remove fluctuations in telemetry data
     level <- serie[[2]]
     right <- 2*abs(diff(level, lag = 2))
@@ -292,8 +279,7 @@ remove_fluctuations <- function(serie)
 }
 
 
-add_missing_hours <- function(serie)
-{
+add_missing_hours <- function(serie) {
     #' Add missing hours to serie
     start <- round(serie[[1]][[1]], units = "hours")
     end <- round(serie[[1]][[nrow(serie)]], units = "hours")
@@ -303,8 +289,7 @@ add_missing_hours <- function(serie)
 }
 
 
-add_missing_days <- function(serie)
-{
+add_missing_days <- function(serie) {
     #' Add missing days to serie
     start <- round(serie[[1]][[1]], units = "day")
     end <- round(serie[[1]][[nrow(serie)]], units = "day")
@@ -315,8 +300,7 @@ add_missing_days <- function(serie)
 }
 
 
-best_subsequence <- function(serie, consec)
-{
+best_subsequence <- function(serie, consec) {
     #' Find longuest continuous subset that does not have more than x consecutive
     #' missing values
 
@@ -364,8 +348,7 @@ best_subsequence <- function(serie, consec)
 }
 
 
-drop_non_rounded_hours <- function(serie)
-{
+drop_non_rounded_hours <- function(serie) {
     #' Remove non rounded hours
     res <- serie[,datetime:=as.POSIXct(round(datetime, units = "hours"))] %>%
         dplyr::distinct(.data = serie, datetime, .keep_all = TRUE)
@@ -373,8 +356,7 @@ drop_non_rounded_hours <- function(serie)
 }
 
 
-daily_consumption_from_telemetry_serie <- function(serie)
-{
+daily_consumption_from_telemetry_serie <- function(serie) {
     serie$first_difference <- c(0, diff(serie[[2]]))
 
     ## Positive values in the first difference are both fluctuations or deliveries
@@ -395,8 +377,7 @@ daily_consumption_from_telemetry_serie <- function(serie)
 
 
 tank_data_for_sitename <- function(telemetry_data, tank_info_client, sitename,
-                                   tanks)
-{
+                                   tanks) {
     telem_sub <- telemetry_data[SITENAME == sitename]
 
     ## Fix telemetry variable names
@@ -427,8 +408,7 @@ tank_data_for_sitename <- function(telemetry_data, tank_info_client, sitename,
 
 ## Client view data objects and functions
 ClientData <- function(depot_number, telemetry_data, delivery_data,
-                       sites_tanks, tank_info_client)
-{
+                       sites_tanks, tank_info_client) {
     ## Site and tank data for the sites_tanks linked list
     ## We can have multiple sites and 1 site can also have multiple tanks
     f <- pryr::partial(tank_data_for_sitename,
@@ -484,8 +464,7 @@ ClientData <- function(depot_number, telemetry_data, delivery_data,
 }
 
 
-client_view_data <- function(sample_number = NULL)
-{
+client_view_data <- function(sample_number = NULL) {
     if (!exists("telemetry_data")) {
         print("Loading Telemetry Data")
         ##telemetry_data <- TelemetryData()
@@ -546,8 +525,7 @@ client_view_data <- function(sample_number = NULL)
 
 
 client_data_for_depot_number <- function(depot_number, telemetry_data,
-                                         delivery_data, tank_info)
-{
+                                         delivery_data, tank_info) {
     print(depot_number)
     tank_info_client <- tank_info[DPNumber==depot_number]
     sites_tanks <- sites_tanks_for_depot_subset(tank_info_client, telemetry_data$sites)
@@ -562,8 +540,7 @@ client_data_for_depot_number <- function(depot_number, telemetry_data,
 }
 
 
-sites_tanks_for_depot_subset <- function(tank_info_client, telemetry_sites)
-{
+sites_tanks_for_depot_subset <- function(tank_info_client, telemetry_sites) {
     sites <- list()
     for (i in 1:nrow(tank_info_client)) {
         sitename <- as.character(tank_info_client[i, "TelemetrySitename"])
@@ -578,8 +555,7 @@ sites_tanks_for_depot_subset <- function(tank_info_client, telemetry_sites)
 
 
 sites_tanks_for_depot_number <- function(depot_number, telemetry_data,
-                                         delivery_data, tank_info)
-{
+                                         delivery_data, tank_info) {
     tank_info_subset <- tank_info[DPNumber==depot_number]
     sites_tanks <- sites_tanks_for_depot_subset(tank_info_subset, telemetry_data$sites)
 
@@ -621,15 +597,13 @@ sites_tanks_for_depot_number <- function(depot_number, telemetry_data,
 ## }
 
 
-split_erp_codes <- function(x)
-{
+split_erp_codes <- function(x) {
     split <- strsplit(as.character(x), "_")
     return(split[[1]][1])
 }
 
 
-MatchedDelTel <- function(del, tel, depot_number, tanks_dp)
-{
+MatchedDelTel <- function(del, tel, depot_number, tanks_dp) {
     #' Here tel variable is the deliveries calculated from the telemetry
 
     match_df <- match_time_series(del, tel, time_window = 24)
@@ -662,8 +636,7 @@ MatchedDelTel <- function(del, tel, depot_number, tanks_dp)
 }
 
 
-telemetry_from_tanks <- function(tanks)
-{
+telemetry_from_tanks <- function(tanks) {
     if (length(tanks) == 1) {
         tel <- tanks[[1]]$telemetry.serie
     } else {
@@ -676,8 +649,7 @@ telemetry_from_tanks <- function(tanks)
 }
 
 
-match_deliverie_tanks <- function(delivery, tanks, depot_number)
-{
+match_deliverie_tanks <- function(delivery, tanks, depot_number) {
     # Two cases to work with 1 del DP -> 1 tank, 1 del DP -> multiple tanks
     actual_del <- delivery_ts(delivery)
 
@@ -694,15 +666,13 @@ match_deliverie_tanks <- function(delivery, tanks, depot_number)
 }
 
 
-delivery_ts <- function(delivery)
-{
+delivery_ts <- function(delivery) {
     return(plyr::arrange(delivery$df[,c('ShiftRealStartDateTime',
                                         'DeliveredQuantity')], ShiftRealStartDateTime))
 }
 
 
-client_delivery_ts <- function(client, source = c("raw", "tel"))
-{
+client_delivery_ts <- function(client, source = c("raw", "tel")) {
     source <- match.arg(source)
     switch(source,
            raw = {
@@ -732,8 +702,7 @@ client_delivery_ts <- function(client, source = c("raw", "tel"))
 ## }
 
 
-client_consumption_ts <- function(client)
-{
+client_consumption_ts <- function(client) {
     #' If the client has multiple tanks they are merged together
     consumption_list <- lapply(client$tank, function(x) x$consumption.serie)
     merged <- stats::aggregate(. ~ datetime, data.table::rbindlist(consumption_list), sum)
@@ -752,8 +721,7 @@ client_consumption_ts <- function(client)
 
 
 #' Fetching function
-fetch_serie_time <- function(client, serie = c("tel", "del", "con"), start, end)
-{
+fetch_serie_time <- function(client, serie = c("tel", "del", "con"), start, end) {
     serie <- match.arg(serie)
     switch(serie,
            tel = subset(get_client_telemetry(client), datetime <= end & datetime >= start),
@@ -762,14 +730,12 @@ fetch_serie_time <- function(client, serie = c("tel", "del", "con"), start, end)
 }
 
 
-get_client_product <- function(client)
-{
+get_client_product <- function(client) {
     return(client$tank[[1]]$product)
 }
 
 
-filter_product <- function(l, products)
-{
+filter_product <- function(l, products) {
     is.product <- function(client, products)
     {
         #' Return True if the client's product is the product
@@ -783,14 +749,12 @@ filter_product <- function(l, products)
 }
 
 
-get_client_tank_unit <- function(client)
-{
+get_client_tank_unit <- function(client) {
     return(client$tank[[1]]$unit)
 }
 
 
-filter_tank_unit <- function(l, units)
-{
+filter_tank_unit <- function(l, units) {
     is.unit <- function(client, units)
     {
         #' Return True if the client's product is the product
@@ -804,8 +768,7 @@ filter_tank_unit <- function(l, units)
 }
 
 
-fetch_small_amounts <- function(client, serie = c("con", "del"), amount)
-{
+fetch_small_amounts <- function(client, serie = c("con", "del"), amount) {
     serie <- match.arg(serie)
     switch(serie,
            del = subset(client$matched$df, DeliveredQuantity <= amount)[,c(1,2,3,4)],
@@ -813,8 +776,7 @@ fetch_small_amounts <- function(client, serie = c("con", "del"), amount)
 }
 
 
-min_matched_amount <- function(client, serie = c("con", "del"))
-{
+min_matched_amount <- function(client, serie = c("con", "del")) {
     serie <- match.arg(serie)
     df <- client$match$df[complete.cases(client$match$df),]
     switch(serie,
@@ -823,8 +785,7 @@ min_matched_amount <- function(client, serie = c("con", "del"))
 }
 
 
-filter_cvd <- function(cvd)
-{
+filter_cvd <- function(cvd) {
     res <- Filter(function(x) !is.null(x$matched), cvd) %>%
         filter_product(., c("LN2", "LO2", "LAR")) %>%
         Filter(function(x) !is.na(x$matched$ratio), .) %>%
@@ -834,8 +795,7 @@ filter_cvd <- function(cvd)
 }
 
 
-get_client_total_deliveries <- function(client, type)
-{
+get_client_total_deliveries <- function(client, type) {
     type <- match.arg(type, c("del", "tel"))
     tot <- switch(type,
                   tel = sum(client$matched$df$Amount, na.rm = TRUE),
@@ -844,16 +804,14 @@ get_client_total_deliveries <- function(client, type)
 }
 
 
-client_del_con_ratio <- function(client)
-{
+client_del_con_ratio <- function(client) {
     del <- get_client_total_deliveries(client, "tel")
     con <- sum(client_consumption_ts(client)$value)
     return(del/con)
 }
 
 
-filter_client_del_con_ratio <- function(cvd, low, high)
-{
+filter_client_del_con_ratio <- function(cvd, low, high) {
     res <- Filter(function(x) client_del_con_ratio(x) < high &&
                               client_del_con_ratio(x) > low,
                   cvd)
@@ -861,52 +819,83 @@ filter_client_del_con_ratio <- function(cvd, low, high)
 }
 
 
-get_client_matching_ratio <- function(client)
-{
+get_client_matching_ratio <- function(client) {
     return(client$matched$ratio)
 }
 
 
-get_client_matching_cor <- function(client)
-{
+get_client_matching_cor <- function(client) {
     return(client$matched$cor)
 }
 
 
-get_client_matching_length <- function(client)
-{
+get_client_matching_length <- function(client) {
     return(client$matched$length)
 }
 
 
-get_client_correlation <- function(client)
-{
+get_client_correlation <- function(client) {
     return(client$matched$cor)
 }
 
 
-get_client_safety_level <- function(client, a = 0.2)
-{
+get_client_safety_level <- function(client, a = 0.2) {
     #' Apply over all tanks if the client has multiple and sum the values
     return(a * sum(sapply(client$tank, function(x) x$max.level)))
 }
 
 
-get_client_safety_level_unit <- function(client)
-{
+get_client_safety_level_unit <- function(client) {
     #' Apply over all tanks if the client has multiple
     return(sapply(client$tank, function(x) x$max.level.unit))
 }
 
 
-get_client_telemetry <- function(client)
-{
+get_client_telemetry <- function(client) {
     return(telemetry_from_tanks(client$tank))
 }
 
 
-train_test_split <- function(l, n = 0.8)
-{
+client_con_xts <- function(client, time_scale) {
+    time_scale <- match.arg(time_scale, c("days", "weeks", "months"))
+
+    serie <- client_consumption_ts(client)
+
+    switch(time_scale, weeks = {
+        serie %<>% convert_xts_weekly(.)
+    }, days = {
+        serie %<>% convert_xts_daily(.)
+    }, months = {
+        serie %<>% convert_xts_monthly(.)
+    })
+
+    serie %<>% trim_ts(., n = 1)
+    return(serie)
+}
+
+
+client_del_xts <- function(client, source, time_scale) {
+    source <- match.arg(source, c("raw", "tel"))
+    time_scale <- match.arg(time_scale, c("days", "weeks", "months"))
+
+    serie <- client_delivery_ts(client, source = source) %>%
+        add_missing_days
+
+    switch(time_scale, weeks = {
+        serie <- convert_xts_weekly(serie) %>%
+            trim_ts(., n = 1, how = "end")
+    }, days = {
+        serie <- convert_xts_daily(serie)
+    }, months = {
+        serie <- convert_xts_monthly(serie) %>%
+            trim_ts(., n = 1, how = "end")
+    })
+
+    return(serie)
+}
+
+
+train_test_split <- function(l, n = 0.8) {
     split <- round(length(l) * n)
 
     structure(

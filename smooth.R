@@ -8,8 +8,7 @@ library(forecast)
 #' imports
 
 #' functions
-ksmooth_xts <- function(data, ...)
-{
+ksmooth_xts <- function(data, ...) {
     #' Smooth using ksmooth and return an xts
     res <- ksmooth(index(data), data, ...)$y
 

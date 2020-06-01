@@ -4,9 +4,7 @@ conver_LN2 <- readRDS("../data/master/conver_LN2.rds")
 
 
 ## TODO - the reverse of everything
-
-convert_pressure_to_delivery <- function(client)
-{
+convert_pressure_to_delivery <- function(client) {
     cor <- get_client_matching_cor(client)
     product <- get_client_product(client)
     df <- client$matched$df

@@ -13,8 +13,7 @@ library(pryr)
 source("operators.R")
 
 #' functions
-deliveries_from_telemetry <- function(telemetry, threshold = 10, max_ratio = NULL)
-{
+deliveries_from_telemetry <- function(telemetry, threshold = 10, max_ratio = NULL) {
     #' loop that looks over all the telemetry and find sequences of positive amounts
     #' Initialize the looping variables
     telemetry %<>% as.data.frame  # Indexing is faster as a data.frame
@@ -70,20 +69,17 @@ deliveries_from_telemetry <- function(telemetry, threshold = 10, max_ratio = NUL
 }
 
 
-is_Date <- function(x)
-{
+is_Date <- function(x) {
     return(inherits(x, 'Date'))
 }
 
 
-is_POSIXct <- function(x)
-{
+is_POSIXct <- function(x) {
     return(inherits(x, 'POSIXct'))
 }
 
 
-match_time_series <- function(a, b, time_window=10)
-{
+match_time_series <- function(a, b, time_window=10) {
     #' Match two time series time index together
     #' Input - (a,b): two dataframes containing the time series
     #'         time_window: the window of time to search around for a match
@@ -179,20 +175,17 @@ match_time_series <- function(a, b, time_window=10)
 }
 
 
-cor_matched_time_series <- function(df)
-{
+cor_matched_time_series <- function(df) {
     return(cor(df[[2]], df[[4]], use = "pairwise.complete.obs", method = "pearson"))
 }
 
 
-matching_ratio <- function(df)
-{
+matching_ratio <- function(df) {
     return(sum(complete.cases(df))/nrow(df))
 }
 
 
-best_start_matching <- function(df)
-{
+best_start_matching <- function(df) {
     #' Return the best start row index of the matches dataframe.
     #' i.e. return the index of first row that does not have any NA values
     #' starting from the top of dataframe
@@ -206,8 +199,7 @@ best_start_matching <- function(df)
 }
 
 
-best_end_matching <- function(df)
-{
+best_end_matching <- function(df) {
     #' Return the best end row index of the matches dataframe.
     #' i.e. return the index of the first row that does not have nay NA values
     #' starting from the end of the df.

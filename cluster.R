@@ -17,74 +17,16 @@ source("forecast.R")
 source("ADIDA.R")
 source("error.R")
 source("dtwclust.R")
+source("purrr.R")
 
 #' functions
-client_cluster_con_serie <- function(client, time_scale)
-{
-    time_scale <- match.arg(time_scale, c("days", "weeks", "months"))
-
-    serie <- client_consumption_ts(client)
-
-    switch(time_scale, weeks = {
-        serie %<>% convert_xts_weekly(.)
-    }, days = {
-        serie %<>% convert_xts_daily(.)
-    }, months = {
-        serie %<>% convert_xts_monthly(.)
-    })
-
-    serie %<>% trim_ts(., n = 1)
-    return(serie)
-}
-
-
-get_con_series <- function(cvd, time_scale)
-{
-    series <- lapply(cvd, client_cluster_con_serie,
-                     time_scale = time_scale)
-    return(series)
-}
-
-
-client_cluster_del_serie <- function(client, source, time_scale)
-{
-    source <- match.arg(source, c("raw", "tel"))
-    time_scale <- match.arg(time_scale, c("days", "weeks", "months"))
-
-    serie <- client_delivery_ts(client, source = source) %>%
-        add_missing_days
-
-    switch(time_scale, weeks = {
-        serie <- convert_xts_weekly(serie) %>%
-            trim_ts(., n = 1, how = "end")
-    }, days = {
-        serie <- convert_xts_daily(serie)
-    }, months = {
-        serie <- convert_xts_monthly(serie) %>%
-            trim_ts(., n = 1, how = "end")
-    })
-
-    return(serie)
-}
-
-
-get_del_series <- function(cvd, source, time_scale)
-{
-    source <- match.arg(source, c("raw", "tel"))
-    series <- lapply(cvd, client_cluster_del_serie,
-                     source = source, time_scale = time_scale)
-    return(series)
-}
-
-
-cluster_data <- function(cvd, source, time_scale)
-{
+cluster_data <- function(cvd, source, time_scale) {
     ## Get the data
     print("Fetching delivery series")
-    del_orig <- get_del_series(cvd, source = source, time_scale = time_scale)
+    del_orig <- lapply(cvd, client_del_xts, source = source, time_scale = time_scale)
 
     print("Fetching consumption series")
-    con_orig <- get_con_series(cvd, time_scale = time_scale)
+    con_orig <- lapply(cvd, client_con_xts, time_scale = time_scale)
 
     print("Preprocessing delivery data")
     del <- mclapply(del_orig,
