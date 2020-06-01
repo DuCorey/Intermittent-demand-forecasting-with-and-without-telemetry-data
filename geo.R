@@ -11,8 +11,7 @@ library('ggplot2')
 #' imports
 
 #' functions
-format_zip <- function(zip)
-{
+format_zip <- function(zip) {
     #' The zips are encoded as strings of floating numbers with .0
     #' This removes only gets the digits we want for the zip
     res <- strsplit(zip, "[.]")
@@ -20,14 +19,12 @@ format_zip <- function(zip)
 }
 
 
-get_address <- function(client)
-{
+get_address <- function(client) {
     client_info <- na.omit(c(client$address, client$city, client$state, format_zip(client$zip)))
     return(paste(client_info, collapse = ", "))
 }
 
-init_latlon <- function(client_list)
-{
+init_latlon <- function(client_list) {
     address <- lapply(client_list, get_address)
 
     f <- pryr::partial(ggmap::geocode, output = "latlon")
@@ -40,8 +37,7 @@ init_latlon <- function(client_list)
     return(geo_df)
 }
 
-update_latlon <- function(df)
-{
+update_latlon <- function(df) {
     for (ind in which(!complete.cases(df))) {
         address <- as.character(df[ind, 'address'])
         res <- ggmap::geocode(address, output = "latlon")
@@ -52,14 +48,12 @@ update_latlon <- function(df)
 }
 
 
-missing_geo <- function(geo_df)
-{
+missing_geo <- function(geo_df) {
     return(geo_df[which(!complete.cases(geo_df)),])
 }
 
 
-geo_plot <- function(df)
-{
+geo_plot <- function(df) {
     usa <- ggplot2::map_data("usa")
     ggplot() +
         geom_polygon(data = usa, aes(x=long, y = lat, group = group)) +

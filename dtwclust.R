@@ -91,8 +91,7 @@ plot.TSClusters <- function(x, y, ...,
                             clus = seq_len(x@k), labs.arg = NULL,
                             series = NULL, time = NULL,
                             plot = TRUE, type = NULL,
-                            labels = NULL)
-{
+                            labels = NULL) {
                                         # set default type if none was provided
     if (!is.null(type)) # nocov start
         type <- match.arg(type, c("dendrogram", "series", "centroids", "sc"))
