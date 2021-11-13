@@ -20,195 +20,11 @@ source("dtwclust.R")
 source("purrr.R")
 
 #' functions
-cluster_data <- function(cvd, source, time_scale) {
-    ## Get the data
-    print("Fetching delivery series")
-    del_orig <- lapply(cvd, client_del_xts, source = source, time_scale = time_scale)
-
-    print("Fetching consumption series")
-    con_orig <- lapply(cvd, client_con_xts, time_scale = time_scale)
-
-    print("Preprocessing delivery data")
-    del <- mclapply(del_orig,
-                    pryr::partial(filter_year, time_scale = time_scale) %c% my_croston,
-                    mc.cores = 8)
-
-    print("Preprocessing consumption data")
-    con <- mclapply(con_orig,
-                    pryr::partial(filter_year, time_scale = time_scale) %c% ets_smooth_xts,
-                    mc.cores = 8)
-
-    ## Combine both truth series of not null values for del and con
-    f <- not %c% is.null
-    ind <- sapply(del, f) & sapply(con, f)
-    del <- del[ind]
-    con <- con[ind]
-    cvd <- cvd[ind]
-    del_orig <- del_orig[ind]
-    con_orig <- con_orig[ind]
-
-
-    ## Structuring the final output so  that it's a list
-    ## This is so ugly that I feel like I did something wrong somewhere
-    del <- mapply(list, orig = del_orig, smooth = del, SIMPLIFY = FALSE)
-    con <- mapply(list, orig = con_orig, smooth = con, SIMPLIFY = FALSE)
-    res <- mapply(list, cvd = cvd, del = del, con = con , SIMPLIFY = FALSE)
-    return(res)
-}
-
-
-replace_ksmooth_clus <- function(data)
-{
-    #' Replace the smooth consumption with a ksmooth
-    con_orig <- data$con$orig
-    con_smooth <- filter_year(ksmooth_xts(con_orig, kernel = "normal", bandwidth = 50), "days")
-
-    data$con$smooth <- con_smooth
-
-    return(data)
-}
-
-
-## get_clus_DPs <- function(clus)
-## {
-##     return(sapply(clus$cvd, function(x) x$DP))
-## }
-
-
-## filter_clus <- function(clus, set)
-## {
-##     ind <- get_clus_DPs(clus) %in% set
-
-##     clus$cvd %<>% .[ind]
-##     clus$con$series %<>% .[ind]
-##     clus$con$orig %<>% .[ind]
-##     clus$del$series %<>% .[ind]
-##     clus$del$orig %<>% .[ind]
-
-##     return(clus)
-## }
-
-
-del_clus_series <- function(clus_data, type)
-{
-    #' Return deliveries series from the clustering data
-    type <- match.arg(type, c("orig", "smooth"))
-
-    switch(type,
-           "orig"   = lapply(clus_data, function(x) x$del$orig),
-           "smooth" = lapply(clus_data, function(x) x$del$smooth))
-}
-
-
-con_clus_series <- function(clus_data, type)
-{
-    #' Return deliveries series from the clustering data
-    type <- match.arg(type, c("orig", "smooth"))
-
-    switch(type,
-           "orig"   = lapply(clus_data, function(x) x$con$orig),
-           "smooth" = lapply(clus_data, function(x) x$con$smooth))
-}
-
-
-mv_serie <- function(con, del, pad = 0)
-{
-    #' Return a multivate serie when given a con and del series
-    merged <- merge(con, del) %>%
-        as.matrix(.)  # We can't add padding to an xts object so we convert to matrix
-
-    ## Remove NAs, can't use drop NA since this is a matrix
-    merged <- merged[complete.cases(merged),]
-
-    ## Add some 0 padding for the mv clustering method
-    if (pad > 0) {
-        zeros <- rep(0, times = pad)
-        padding <- as.matrix(data.frame(con = zeros, del = zeros))
-        merged <- rbind(padding, merged, padding)
-    }
-
-    return(merged)
-}
-
-
-mv_series <- function(clus_data, pad = NULL)
-{
-    return(lapply(clus_data, function(x) mv_serie(x$con$smooth, x$del$smooth, pad)))
-}
-
-
-mv_clus_series <- function(clus_data, series_type)
-{
-    #' Produce multivariate or univarite series from the cluster_data
-    ## Provide the univariate series if requested
-    dels <- switch(series_type$del,
-                   "smooth" = del_clus_series(clus_data, "smooth"),
-                   "raw" = data_orig_dels(clus_data))
-    cons <- switch(series_type$con,
-                  "smooth" = con_clus_series(clus_data, "smooth"),
-                  "raw" = data_orig_con(clus_data))
-    series <- mapply(function(x,y) mv_serie(x, y, series_type$pad), cons, dels,
-                     SIMPLIFY = FALSE)
-    return(series)
-}
-
-
-mv_series_con <- function(series)
-{
-    #' Return the consumption part of the multivariate series
-    return(lapply(series, function(x) x[,"con"]))
-}
-
-
-mv_series_del <- function(series)
-{
-    #' Return the delivery part of the multivariate series
-    return(lapply(series, function(x) x[,"del"]))
-}
-
-
-data_smooth_dels <- function(data)
-{
-    res <- del_clus_series(data, "smooth") %>%
-        ## Carefully convert the delivery series to numeric so as to be consistent with the
-        ## data being sent over the the clusering method
-        lapply(., function(x) as.matrix(x)[,1])
-    return(res)
-}
-
-
-data_orig_dels <- function(data)
-{
-    res <- del_clus_series(data, "orig") %>%
-        lapply(., filter_year, time_scale = "days")
-    return(res)
-}
-
-
-data_smooth_con <- function(data)
-{
-    res <- con_clus_series(data, "smooth") %>%
-        ## Carefully convert the delivery series to numeric so as to be consistent with the
-        ## data being sent over the the clusering method
-        lapply(., function(x) as.matrix(x)[,1])
-    return(res)
-}
-
-
-data_orig_con <- function(data)
-{
-    res <- con_clus_series(data, "orig") %>%
-        lapply(., filter_year, time_scale = "days")
-    return(res)
-}
-
-
 ## TODO - Can we extend this to time series of less than 1 year or of mismatched time?
 ## Looks probable as the distance methods accept variable lenghts
-my_clustering <- function(clus_data, series_type, k, trace = TRUE, ...)
-{
-    #' Fetch the series for clustering
-    series <- mv_clus_series(clus_data, series_type)
+my_clustering <- function(series, k, trace = TRUE, ...) {
+    #' Wrapper over dtwclust::tsclust to save initial data
+    #' Also allows it to run for k = 1 cluster
 
     if (k != 1) {
         clus <- dtwclust::tsclust(series,
@@ -222,16 +38,18 @@ my_clustering <- function(clus_data, series_type, k, trace = TRUE, ...)
     } else {
         #' Allow for k = 1 clustering even though the original function complains about it
         ## Run it normally with 2 (fastest clustering)
-        clus <- my_clustering(clus_data, type, k = 2, distmat)
+        clus <- my_clustering(series, k = 2, trace = trace, ...)
 
         ## Overwrite the cluster member so that they are all 1
-        attributes(clus)$cluster <- rep(1, times = length(clus@cluster))
+        ones <- rep(1, times = length(clus@cluster))
+        names(ones) <- names(series)
+        attributes(clus)$cluster <- ones
 
         ## Overwrtie the clustering method to only return 1
-        clus@family@cluster <- function(distmat = NULL, ...)
-        {
+        clus@family@cluster <- function(distmat = NULL, ...) {
             return(rep(1, nrow(distmat)))
         }
+        attributes(clus)$k <- 1
     }
     return(clus)
 }
@@ -240,30 +58,20 @@ my_clustering <- function(clus_data, series_type, k, trace = TRUE, ...)
 ## The order of the columns in the centroids follows the order of the mv serie
 ## con is column 1
 ## del is column 2
-con_centroids <- function(clus)
-{
+con_centroids <- function(clus) {
     #' Return the centroids of the consumption sequence of the mv data
     return(lapply(clus@centroids, function(x) x[,1]))
 }
 
 
-del_centroids <- function(clus)
-{
+del_centroids <- function(clus) {
     #' Return the centroids of the delivery sequence of the mv data
-    return(lapply(clus@centroids, function(x) x[,2]))
+    return(lapply(clus@centroids, function(x) x[,"del"]))
 }
 
 
-## del_datalist <- function(clus)
-## {
-##     #' Return the delivery sequence of the mv data in the cluster original data
-##     return(lapply(clus@datalist, function(x) x[,"del"]))
-## }
-
-
-clus_preproc <- function(newdata, clus)
-{
-    #' Apply the preprocissing function on the data
+clus_preproc <- function(newdata, clus) {
+    #' Apply the preprocessing function on the data
     newdata <- quoted_call(
         clus@family@preproc,
         newdata,
@@ -273,8 +81,7 @@ clus_preproc <- function(newdata, clus)
 }
 
 
-clus_calc_distance_matrix <- function(newdata, clus, centroids)
-{
+clus_calc_distance_matrix <- function(newdata, clus, centroids) {
     #' Calculate the distance matrix between the newdata and the centroids
     dist_mat <- quoted_call(
         clus@family@dist,
@@ -287,15 +94,13 @@ clus_calc_distance_matrix <- function(newdata, clus, centroids)
 }
 
 
-clus_centroid <- function(newdata, clus)
-{
+clus_centroid <- function(newdata, clus) {
     #' Apply the clusters centroid function to the new data
     return(clus@family@allcent(newdata))
 }
 
 
-mv_del_cluster_predictions <- function(newdata, clus)
-{
+mv_del_cluster_predictions <- function(newdata, clus) {
     #' Predict which cluster to assign new_data
     nm <- names(newdata)
     ## Preprocess the newdata with the cluster's preprocessing function
@@ -312,8 +117,7 @@ mv_del_cluster_predictions <- function(newdata, clus)
 }
 
 
-clus_shapes <- function(clus, method, con_shape_series)
-{
+clus_shapes <- function(clus, method, con_shape_series) {
     #' How we determine the shapes of our cluster so we can use them in our
     #' future predictions
     method <- match.arg(method, c("mean", "unzscore", "medoid", "centroid"))
@@ -368,15 +172,13 @@ clus_shapes <- function(clus, method, con_shape_series)
 }
 
 
-my_nearest_neighbors <- function(i, distance_matrix, k)
-{
-    #' Return the nearest_neighbors for the ith row in the distance_matrix
+my_nearest_neighbors <- function(i, distance_matrix, k) {
+    #' Return the k nearest_neighbors for the ith row in the distance_matrix
     return(order(distance_matrix[i, ])[1:k])
 }
 
 
-nn_shape <- function(method, con_shape_series)
-{
+nn_shape <- function(method, con_shape_series) {
     #' How we determine the shape of the nearest neighbors group of series
     method <- match.arg(method, c("mean"))
 
@@ -395,35 +197,7 @@ nn_shape <- function(method, con_shape_series)
 }
 
 
-#' This is dangerous you shouldn't ever need to do something like this.
-## is_multivariate <- function(x) {
-##     if (length(x) == 0L) {
-##         stop("Empty list of series received.") # nocov
-##     }
-
-##     ncols <- sapply(x, NCOL)
-
-##     if (any(diff(ncols) != 0L)) {
-##         stop("Inconsistent dimensions across series.")
-##     }
-
-##     any(ncols > 1L)
-## }
-
-
-## my_is_multivariate <- function(x)
-## {
-##     return(TRUE)
-## }
-
-
-## assignInNamespace("is_multivariate", is_multivariate, "dtwclust")
-
-## getFromNamespace("is_multivariate", "dtwclust")
-
-
-mv_clus_con_prediction <- function(clus, new_dels, shape, con_shape_series)
-{
+mv_clus_con_prediction <- function(clus, new_dels, shape, con_shape_series) {
     ## Predict a cluster for each delivery series
     pred_clus <- mv_del_cluster_predictions(new_dels, clus)
 
@@ -437,8 +211,7 @@ mv_clus_con_prediction <- function(clus, new_dels, shape, con_shape_series)
 }
 
 
-mv_knn_con_prediction <- function(shape, con_shape_series, k, distmat)
-{
+mv_knn_con_prediction <- function(shape, con_shape_series, k, distmat) {
     #' Find the nearest neighbors for each delivery series and create a shape
     #' from the original consumption of those nearest neighbors
     ## We need to find the nearest_neighbor for each new delivery
@@ -451,8 +224,7 @@ mv_knn_con_prediction <- function(shape, con_shape_series, k, distmat)
 }
 
 
-mv_fuzzy_con_prediction <- function(clus, new_dels, shape, con_shape_series)
-{
+mv_fuzzy_con_prediction <- function(clus, new_dels, shape, con_shape_series) {
     #' Return the consumption prediction for fuzzy clusters
     ## Returns a fuzzy distance matrix to each centroid
     pred_clus <- mv_del_cluster_predictions(new_dels, clus)
@@ -472,8 +244,7 @@ mv_fuzzy_con_prediction <- function(clus, new_dels, shape, con_shape_series)
 }
 
 
-mv_con_prediction <- function(train, test, cluster, clustering, shape, shape_series, ...)
-{
+mv_con_prediction <- function(train, test, cluster, clustering, shape, shape_series, ...) {
     #' Predict a consumption series for each element of the new_dels
     ## Fetch the shape series
     shape_series <- match.arg(shape_series, c("smooth", "orig"))
@@ -515,8 +286,7 @@ mv_con_prediction <- function(train, test, cluster, clustering, shape, shape_ser
 }
 
 
-cluster_table <- function(c1, c2)
-{
+cluster_table <- function(c1, c2) {
     #' Return the cross tabulation table between the clusters c1 and c2
     #' Return the greatest elements in the table and their weight in the cluster
     orig <- table(c1@cluster, c2@cluster)
@@ -584,11 +354,18 @@ cluster_table <- function(c1, c2)
 if (FALSE) {  # Prevents it from running when sourcing the file
     #' dtw example
     a <- ts(sin(seq(0, 2*pi, length.out = 100)))
-    b <- ts(sin(seq(pi, 2*pi, length.out = 50)))
+    b <- ts(cos(seq(0, 2*pi, length.out = 100)))
     foo <- dtw(a, b, window.type = "slantedband", window.size = 2)
     foo <- dtw(a, b)
+
+    png("./papers/thesis/2waydtw.png")
     dtwPlotTwoWay(foo, a, b)
+    dev.off()
+
+    png("./papers/thesis/3waydtw.png")
     dtwPlotThreeWay(foo, a, b)
+    dev.off()
+
 
     #' This is to show equivalency between dtwclust::dtw_basic and dtw::dtw
     data("uciCT")
@@ -614,7 +391,7 @@ if (FALSE) {  # Prevents it from running when sourcing the file
     foo <- clus_tel_day[[1]]$con$smooth
     bar <- clus_tel_day[[1]]$con$orig %>%
         ets_smooth_xts(.) %>%
-        filter_year(., "days")
+        filter_full_year(., "days")
     all.equal(foo, bar)
 
     #' Testing clustering
@@ -635,11 +412,12 @@ if (FALSE) {  # Prevents it from running when sourcing the file
 
     #' Prediction
     ##' Cluster prediction
-    new_dels <- del_clus_series(data, "smooth") %>%
+    new_dels <- pluck_list(data, "del", "smooth") %>%
         ## Convert the delivery series to numeric so as to be consistent with the
         ## data being sent over the the clusering method
         lapply(., function(x) as.matrix(x)[,1])
-    con_shape_series <- mv_series_con(clus@orig_data)
+
+    con_shape_series <- lapply(clus@orig_data, function(x) x[,"con"])
 
     ## Apply the preprocessing function on the data
     newdata <- clus_preproc(new_dels, clus)[[1]]
@@ -664,7 +442,7 @@ if (FALSE) {  # Prevents it from running when sourcing the file
 
 
     #' Nearest Neighbor
-    test_dels <- del_clus_series(data, "smooth") %>%
+    test_dels <- pluck_list(data, "del", "smooth") %>%
         ## Convert the delivery series to numeric so as to be consistent with the
         ## data being sent over the the clusering method
         lapply(., function(x) as.matrix(x)[,1])
@@ -681,14 +459,14 @@ if (FALSE) {  # Prevents it from running when sourcing the file
     #' The top function
     ##' Clustering
     data <- clus_tel_day[1:10]
-    new_dels <- del_clus_series(data, "smooth") %>%
+    new_dels <- pluck_list(data, "del", "smooth") %>%
         ## Convert the delivery series to numeric so as to be consistent with the
         ## data being sent over the the clusering method
         lapply(., function(x) as.matrix(x)[,1])
-    orig_dels <- del_clus_series(data, "orig") %>%
-        lapply(., filter_year, time_scale = "days")
-    orig_con <- con_clus_series(data, "orig") %>%
-        lapply(., filter_year, time_scale = "days")
+    orig_dels <- pluck_series(data, "del", "orig") %>%
+        lapply(., filter_full_year, time_scale = "days")
+    orig_con <- pluck_list(data, "con", "orig") %>%
+        lapply(., filter_full_year, time_scale = "days")
 
     clus <- my_clustering(data, series_type = "mv", k = 2, preproc = zscore, trace = FALSE)
 

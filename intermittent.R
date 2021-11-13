@@ -74,6 +74,13 @@ croston_smooth <- function(object, ...) {
     UseMethod("croston_smooth")
 }
 
+
+croston_smooth.xts <- function(obj, ...) {
+    #' Smooth the data using croston
+    return(croston_smooth(croston(obj, ...)))
+}
+
+
 croston_smooth.croston <- function(obj, ...) {
     #' Smooth the data using croston
     #' Pass it a croston object with fitted data
@@ -83,7 +90,7 @@ croston_smooth.croston <- function(obj, ...) {
     ## Smoothing always loses the first point of data
     if (is.xts(obj$fitted)) {
         smoothed <- smoothed[!is.na(smoothed)] %>%
-            xts(., order.by = tail(index(obj$fitted), -1))
+            xts(., order.by = tail(index(obj$fitted), -sum(is.na(smoothed))))
 
         attr(smoothed, 'frequency') <- frequency(obj$fitted)
     } else {
@@ -173,7 +180,7 @@ result_forecast.crostonforecast <- function(fcast) {
 }
 
 
-ASACT <- function(data, agg.time, ffun, h = agg.time, smooth_model = NULL) {
+ASACT <- function(data, agg.time, ffun, h = agg.time) {
     #' Implementation of ASACT forecast by (Murray et al. 2018)
     #' Initial data is the low level time series
     #' A) Smooth
@@ -182,15 +189,12 @@ ASACT <- function(data, agg.time, ffun, h = agg.time, smooth_model = NULL) {
     #' D) Disaggreate to return to the original time scale
     #' Methods B), C) and D) are essentially the ADIDA method
 
-    ## A) Smooth with croston
-    if (is.null(smooth_model)) {
-        smooth_model <- croston(data, "SBA.opt")
-    }
-
+    ## A) Smooth with croston opt
+    smooth_model <- croston(data, f.type = "SBA.opt")
     ## Use the passed compacted smooth model
     smooth <- croston_smooth(smooth_model, data)
 
-    ## D), C), D) using ADIDA
+    ## B), C), D) using ADIDA
     res <- ADIDA(smooth, agg.time, ffun, h, disaggregate_sma)
 
 
@@ -207,25 +211,6 @@ ASACT <- function(data, agg.time, ffun, h = agg.time, smooth_model = NULL) {
             fmodel = res$fmodel
         ),
         class = "ASACT"
-    )
-}
-
-
-forecast.ASACT <- function(obj, h, ...) {
-    #' Forecasting the ASACT is simply forecasting the ADIDA part since we keep
-    #' the smoothed data in the fitted object
-    ## We need to pass these missing parameters to the forecast.ADIDA method
-    obj$binsize <- obj$agg.time
-    obj$disagfun <- disaggregate_sma
-
-    res <- forecast.ADIDA(obj, h, ...)
-
-
-    structure(
-        list(
-            out = res$out
-        ),
-        class = "ASACTforecast"
     )
 }
 
@@ -266,6 +251,118 @@ forecast.ASACTcompact <- function(obj, x, h) {
 
 
 result_forecast.ASACTforecast <- function(fcast) {
+    return(as.numeric(fcast$out))
+}
+
+
+ASACT2 <- function(data, agg.time, ffun, h = 1) {
+    #' Implementation of ASACT forecast by (Murray et al. 2018)
+    #' Initial data is the low level time series with proper months support
+    #' A) Smooth
+    #' B) Aggregate
+    #' C) Forecast
+    #' D) Disaggreate to return to the original time scale
+    #' Methods B), C) and D) are essentially the ADIDA method
+
+    agg.time <- match.arg(agg.time, c("week", "month"))
+
+    ## A) Smooth with croston opt
+    smooth_model <- croston(data, "SBA.opt")
+    ## Use the passed compacted smooth model
+    smooth <- croston_smooth(smooth_model, data)
+
+    if (agg.time == "week") {
+        ## The ASACT method is essentially the ADIDA method using 7 for the agg
+        res <- ADIDA(smooth, 7, ffun, h, disaggregate_sma)
+        frc.out  <- res$frc.out
+        disag <- res$disag
+        fmodel <- res$fmodel
+    } else {
+        ## B) Aggregation on months
+        agg <- apply.monthly(smooth, sum)
+        attr(agg, "frequency") <- 12
+
+        ## C) Forecast
+        h_month <- number_of_months_for_horizon(h, tail(agg, 1))
+        fmodel <- ffun(agg)
+        fcast <- result_forecast(forecast(fmodel, h_month))
+
+        ## D) Disagregate each forward step one at a time
+        disag <- c()
+        cur_month <- month(tail(agg, 1))
+        for (i in seq(h_month)) {
+            next_month <- mod(cur_month + i, 12)
+            days <- as.numeric(days_in_month(next_month))
+            sma <- disaggregate_sma(fcast[[i]], days)
+            disag <- c(disag, sma)
+        }
+        frc.out <- head(disag, h)
+    }
+
+
+    structure(
+        list(
+            frc.out = frc.out,
+            smooth = smooth,
+            smooth.model = smooth_model,
+            agg.time = agg.time,
+            disag = disag,
+            fitted = data,
+            agg.time = agg.time,
+            h = h,
+            ffun = ffun,
+            fmodel = fmodel
+        ),
+        class = "ASACT2"
+    )
+}
+
+
+forecast.ASACT2 <- function(obj, h, ...) {
+    #' Forecast of the ASACT 2 method
+    if (h == obj$h) {
+        res <- obj$frc.out
+    } else if (h <= length(obj$disag)) {
+        res <- head(obj$disag, h)
+    } else {
+        res <- forecast(ASACT2(obj$fitted, obj$agg.time, obj$ffun, h = h), h)
+    }
+
+
+    structure(
+        list(
+            out = res
+        ),
+        class = "ASACT2forecast"
+    )
+}
+
+
+update.ASACT2 <- function(obj, newdata, ...) {
+    return(ASACT2(newdata, obj$agg.time, obj$ffun, obj$h, ...))
+}
+
+
+compact_forecast.ASACT2 <- function(obj) {
+    #' Compact representation of the ASACT2 object
+    #' This is all we need to recreate the original object given the same data
+    structure(
+        list(
+            agg.time = obj$agg.time,
+            smooth.model = compact_forecast(obj$smooth.model),
+            fmodel = compact_forecast(obj$fmodel)
+        ),
+        class = "ASACT2compact"
+    )
+}
+
+## TODO
+## forecast.ASACT2compact <- function(obj, x, h) {
+
+## }
+
+
+result_forecast.ASACT2forecast <- function(fcast) {
     return(as.numeric(fcast$out))
 }
 
@@ -312,7 +409,7 @@ MAPA <- function(data, agg, ...) {
 
     structure(
         list(
-            fitted = as.ts(data),
+            x = as.ts(data),
             mapafit = mapafit,
             agg = agg
         ),
@@ -321,8 +418,13 @@ MAPA <- function(data, agg, ...) {
 }
 
 
-forecast.MAPA <- function(obj, h, ...) {
-    fcast <- mapafor(obj$fitted, obj$mapafit, fh = h, ifh = 0, comb = "w.mean")
+fitted.MAPA <- function(obj) {
+    return(obj$mapafit[, "fitted"])
+}
+
+
+forecast.MAPA <- function(obj, h, ifh = 0, ...) {
+    fcast <- mapafor(obj$x, obj$mapafit, fh = h, ifh = ifh, comb = "w.mean")
 
     structure(
         fcast,

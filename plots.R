@@ -111,8 +111,7 @@ asact_err, clus_err, cum_err))
 }
 
 
-plot_vertical_clus <- function(x, series = NULL, grob = FALSE)
-{
+plot_vertical_clus <- function(x, series = NULL, grob = FALSE) {
     #' Plot the multivariate series of a cluter object stacked vertically
     clus <- seq_len(x@k)
     centroids <- x@centroids
@@ -159,14 +158,12 @@ plot_vertical_clus <- function(x, series = NULL, grob = FALSE)
     dfcm$cl <- factor(dfcm$cl)
     dfm$color <- factor(dfm$color)
 
-    cluster_members_labeller <- function(cl)
-    {
+    cluster_members_labeller <- function(cl) {
         members <- percent(sum(x@cluster == cl)/length(x@cluster))
         return(paste("Cluster", cl, "-", members, "mem.", sep = " "))
     }
 
-    single_plot <- function(cl)
-    {
+    single_plot <- function(cl) {
         gg <- ggplot2::ggplot(data.frame(t = integer(),
                                          variable = factor(),
                                          value = numeric(),
@@ -220,8 +217,7 @@ plot_vertical_clus <- function(x, series = NULL, grob = FALSE)
     }
 }
 
-plot_vertical_cluster_series <- function(x, series, preproc = FALSE, grob = FALSE)
-{
+plot_vertical_cluster_series <- function(x, series, preproc = FALSE, grob = FALSE) {
     #' Given the series, will plot then based on the orders of the cluster
     #' object.
 
@@ -234,8 +230,7 @@ plot_vertical_cluster_series <- function(x, series, preproc = FALSE, grob = FALS
 }
 
 
-plot_mv_centroids <- function(x)
-{
+plot_mv_centroids <- function(x) {
     #' Superimpose the multivariate centroids for a cluster object
     clus <- seq_len(x@k)
 
@@ -261,8 +256,7 @@ plot_mv_centroids <- function(x)
     dfcm$cl <- factor(dfcm$cl)
 
     ## Create a labeller which returns the percentage of members in each cluster
-    cluster_members_labeller <- function(cl)
-    {
+    cluster_members_labeller <- function(cl) {
         members <- percent(sum(x@cluster == cl)/length(x@cluster))
         paste("Cluster", cl, "-", members, "mem.", sep = " ")
     }
@@ -274,6 +268,7 @@ plot_mv_centroids <- function(x)
         ggplot2::geom_line() +
         ggplot2::theme(legend.position="top") +
         ggplot2::labs(y = "Normalised Value", colour = "") +
+        ggplot2::scale_color_hue(labels = c("consumption", "delivery")) +
         ggplot2::facet_wrap(~cl, scales = "free_y", labeller = ggplot2::labeller(cl = foo))
 
     plot(gg)

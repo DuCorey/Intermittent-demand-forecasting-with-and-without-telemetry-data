@@ -59,6 +59,13 @@ disaggregate_ema <- function(data, binsize) {
 }
 
 
+disaggregate_identity <- function(data, binsize) {
+    weights <- rep(1, times = binsize)
+    res <- disaggregate_weighted(data, weights)
+    return(res)
+}
+
+
 emaweights <- function(m) {
     alpha <- 2/(m+1)
     i <- 1:m
@@ -229,11 +236,10 @@ series_agg <- function(series, func = mean) {
         res <- apply(df, 1, func)
     }
 
-    colnames(res) <- colnames(series[[1]])
-
     ## If the series as xts, we reformat the output to be xts
     if (is.xts(series[[1]])) {
         res <- as.xts(res, order.by = index(series[[1]]))
+        colnames(res) <- colnames(series[[1]])
     }
 
     return(res)

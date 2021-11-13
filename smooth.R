@@ -18,8 +18,13 @@ ksmooth_xts <- function(data, ...) {
     return(res)
 }
 
-ets_smooth_xts <- function(data, ...)
-{
+
+silverman_bandwidth <- function(serie) {
+    return(sd(serie)*(4/3/length(serie))^(1/5))
+}
+
+
+ets_smooth_xts <- function(data, ...) {
     #' automatic Exponential Smoothing
     if (nrow(data) < 1) {
         warning("ets requires a minimum of 1 value in the time series. Returning NULL.")

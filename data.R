@@ -856,6 +856,12 @@ get_client_telemetry <- function(client) {
 }
 
 
+get_client_max_level <- function(client) {
+    #' Sum the total of all the tanks
+    return(sum(sapply(client$tank, function(x) x$max.level)))
+}
+
+
 client_con_xts <- function(client, time_scale) {
     time_scale <- match.arg(time_scale, c("days", "weeks", "months"))
 
@@ -892,6 +898,14 @@ client_del_xts <- function(client, source, time_scale) {
     })
 
     return(serie)
+}
+
+
+last_tel_reading_of_day <- function(day, client) {
+    #' Return the last telemetry level reading of a day
+    tel <- get_client_telemetry(client)
+    ind <- tail(which(format(tel$datetime, "%Y-%m-%d") == day), 1)
+    return(tel$level[ind])
 }
 
 

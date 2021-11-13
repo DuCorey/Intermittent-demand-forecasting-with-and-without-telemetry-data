@@ -1,18 +1,111 @@
-#' title: models.R
+#' title: con_del_models.R
 #' comments: Demand and consumption models
 #' author: Corey Ducharme / corey.ducharme@polymtl.ca
 
-#' pacakges
+#' packages
 
 #' imports
+source("data.R")
+source("purrr.R")
 source("smooth.R")
 source("error.R")
 source("series.R")
 source("ADIDA.R")
+source("intermittent.R")
+source("cluster.R")
 
 #'functions
-opt_model <- function(opt)
-{
+con_del_data <- function(cvd, source, time_scale) {
+    ## Get the data
+    print("Fetching delivery series")
+    del_orig <- lapply(cvd, client_del_xts, source = source, time_scale = time_scale)
+
+    print("Fetching consumption series")
+    con_orig <- lapply(cvd, client_con_xts, time_scale = time_scale)
+
+    ## Cut the clients that have series less than 1 year
+    f <- function(x) length(x) >= 365
+    ind <- sapply(del_orig, f) & sapply(con_orig, f)
+    cvd <- cvd[ind]
+    del_orig <- del_orig[ind]
+    con_orig <- con_orig[ind]
+
+
+    ## Structuring the final output so  that it's a list
+    ## This is so ugly that I feel like I did something wrong somewhere
+    f <- function(cvd, del_orig, con_orig) {
+        structure(
+            list(
+                cvd = cvd,
+                con = list(orig = con_orig),
+                del = list(orig = del_orig)
+            ),
+            class = "ConDelData"
+        )
+    }
+    res <- mapply(f, cvd, del_orig, con_orig, SIMPLIFY = FALSE)
+    return(res)
+}
+
+
+is.ConDelData <- function(x) {
+    inherits(x, "ConDelData")
+}
+
+
+con_del_mv_series <- function(clus_data, pad = NULL) {
+    return(lapply(clus_data, function(x) mv_serie(x$con$smooth, x$del$smooth, pad)))
+}
+
+
+mv_clus_series <- function(clus_data, series_type) {
+    #' Produce multivariate or univarite series from the cluster_data
+    ## Provide the univariate series if requested
+    dels <- switch(series_type$del,
+                   "smooth" = pluck_list(clus_data, "del", "smooth"),
+                   "raw" = data_orig_dels(clus_data))
+    cons <- switch(series_type$con,
+                   "smooth" = pluck_list(clus_data, "con", "smooth"),
+                   "raw" = data_orig_con(clus_data))
+    series <- mapply(function(x,y) mv_serie(x, y, series_type$pad), cons, dels,
+                     SIMPLIFY = FALSE)
+    return(series)
+}
+
+
+data_smooth_dels <- function(data) {
+    res <- pluck_list(data, "del", "smooth") %>%
+        ## Carefully convert the delivery series to numeric so as to be consistent with the
+        ## data being sent over the the clusering method
+        lapply(., function(x) as.matrix(x)[,1])
+    return(res)
+}
+
+
+data_orig_dels <- function(data) {
+    res <- pluck_list(data, "del", "orig") %>%
+        lapply(., filter_full_year, time_scale = "days")
+    return(res)
+}
+
+
+data_smooth_con <- function(data) {
+    res <- pluck_list(data, "con", "smooth") %>%
+        ## Carefully convert the delivery series to numeric so as to be consistent with the
+        ## data being sent over the the clusering method
+        lapply(., function(x) as.matrix(x)[,1])
+    return(res)
+}
+
+
+data_orig_con <- function(data) {
+    res <- pluck_list(data, "con", "orig") %>%
+        lapply(., filter_full_year, time_scale = "days")
+    return(res)
+}
+
+
+opt_model <- function(opt) {
     res <- switch(as.character(opt),
                   "1" = "ADIDA - SMA",
                   "2" = "ADIDA - EMA",
@@ -24,8 +117,7 @@ opt_model <- function(opt)
 }
 
 
-all_models <- function(con, del, asact_time, asact_init_serie, max_bin = "auto", error_type = "rmse", norm = FALSE)
-{
+all_models <- function(con, del, asact_time, asact_init_serie, max_bin = "auto", error_type = "rmse", norm = FALSE) {
     if (norm) {
         ## Normalize data
         foo <- scale_mult(con, del)
@@ -117,8 +209,7 @@ all_models <- function(con, del, asact_time, asact_init_serie, max_bin = "auto",
 }
 
 
-get_error_model <- function(error, model, opt = "opt", agg_level = NULL)
-{
+get_error_model <- function(error, model, opt = "opt", agg_level = NULL) {
     model <- match.arg(model, c("ADIDA - SMA", "ADIDA - EMA", "Croston", "ASACT", "AGG", "MAPA"))
     opt <- match.arg(opt, c("opt", "q_opt"))
     del <- error$del
@@ -165,8 +256,7 @@ get_error_model <- function(error, model, opt = "opt", agg_level = NULL)
 }
 
 
-optimal_error <- function(error, opt)
-{
+optimal_error <- function(error, opt) {
     opt <- match.arg(opt, c("opt", "q_opt"))
     switch(error[[opt]],
            "ADIDA - SMA" = {
@@ -188,8 +278,7 @@ optimal_error <- function(error, opt)
 }
 
 
-best_model_from_error <- function(error, opt = "opt")
-{
+best_model_from_error <- function(error, opt = "opt") {
     opt <- match.arg(opt, c("opt", "q_opt"))
     opt_model <- error[[opt]]
 
@@ -197,8 +286,7 @@ best_model_from_error <- function(error, opt = "opt")
 }
 
 
-filter_model <- function(l, model)
-{
+filter_model <- function(l, model) {
     is.model <- function(x, model)
     {
         if (x$opt == model) {
@@ -212,8 +300,7 @@ filter_model <- function(l, model)
 }
 
 
-sum_errors <- function(a, b)
-{
+sum_errors <- function(a, b) {
     sma <- a$SMA$error + b$SMA$error
     ema <- a$EMA$error + b$EMA$error
     croston <- a$Croston + b$Croston
@@ -247,23 +334,31 @@ sum_errors <- function(a, b)
 }
 
 
-asact_con_preds <- function(data)
-{
-    #' Return the asact predictions for the customers in the data
+ASACT_con_del <- function(data) {
+    #' ASACT del to con predictions
     #' Asact is calculated from the Croston smoothing of the deliveries, then
     #' normalized to conserve the original deliveries quantity.
-    smooth_dels <- data_smooth_dels(data)
-    orig_dels <- data_orig_dels(data)
-    pred <- mapply(function(x,y) xts(normalize_relative(x, y), order.by = index(y)),
-                   smooth_dels, orig_dels, SIMPLIFY = FALSE)
-    return(pred)
+    if(!is.ConDelData(data)) {
+        stop("Must supply ConDelData")
+    }
+
+
+    ## smooth_dels <- data_smooth_dels(data)
+    ## orig_dels <- data_orig_dels(data)
+    ## pred <- mapply(function(x,y) xts(normalize_relative(x, y), order.by = index(y)),
+    ##                smooth_dels, orig_dels, SIMPLIFY = FALSE)
+    ## return(pred)
 }
 
 
-cum_adida_preds <- function(data)
-{
-    #' Return the cumulative ADIDA predictions for the customers in the data
-    #' CumADIDA is mean aggregation of the ADIDA models ran on the deliveries.
+ADIDA_con_del <- function(data, ffun) {
+    #' ADIDA del to con predictions
+    if(!is.ConDelData(data)) {
+        stop("Must supply ConDelData")
+    }
+    ## In sample ADIDA
+
+
     smooth_dels <- data_smooth_dels(data)
     orig_dels <- data_orig_dels(data)
     pred <- mclapply(orig_dels, cum_adida, max_bin = 180, mc.cores = 8)
@@ -271,9 +366,50 @@ cum_adida_preds <- function(data)
 }
 
 
-con_preds <- function(train, test, cluster, clustering, shape, shape_series, ...)
-{
+MAPA_con_del <- function(data, agg) {
+    #' MAPA del to con predictions
+    if(!is.ConDelData(data)) {
+        stop("Must supply ConDelData")
+    }
+    ## Apply MAPA model on the original delivery data
+    del_data <- data$del$orig
+    fit <- fitted(MAPA(del_data, agg))
 
+    ## The fitted MAPA data is time series of different aggregations levels
+    ## Each has to be disaggregated and then we weigh them together
+    i <- 1L
+    disag <- lapply(fit, function(x) {
+        res <- disaggregate_identity(as.matrix(x), i)
+        i <<- i + 1L
+        return(res)
+    })
+    ## Macth the lengths
+    disag <- lapply(disag,
+                    function(x) purrr::prepend(x, rep(NA, times = length(del_data) - length(x))))
+
+    ## Create a matrix with all the series together
+    mat <- matrix(unlist(disag), ncol = length(disag))
+    res <- apply(mat, 1, mean)
+
+    res <- xts(res, order.by = index(del_data))
+    attr(res, 'frequency') <- frequency(del_data)
+
+    return(res)
+}
+
+
+croston_con_del <- function(data, type) {
+    #' Croston del to con predictions
+    if(!is.ConDelData(data)) {
+        stop("Must supply ConDelData")
+    }
+    ## Apply Croston smoothing on the original delivery data
+    con_pred <- croston_smooth(croston(data$del$orig, type))
+    return(con_pred)
+}
+
+
+con_preds <- function(train, test, cluster, clustering, shape, shape_series, ...) {
     clus_pred <- mv_con_prediction(train, test, cluster, clustering, shape, shape_series, ...) %>%
         ## We only take the normalize predicted series from the object
         lapply(., function(x) x$norm)
@@ -285,6 +421,20 @@ con_preds <- function(train, test, cluster, clustering, shape, shape_series, ...
 
     orig_con <- data_orig_con(test)
 
+
+    res <- mapply(list,
+                  real = real_con,
+                  clus = mapply(list, pred = clus_pred, err = clus_err, SIMPLIFY = FALSE),
+                  asact = mapply(list, pred = asact_pred, err = asact_err, SIMPLIFY = FALSE),
+                  cum = mapply(list, pred = cum_pred, err = cum_err, SIMPLIFY = FALSE),
+                  SIMPLIFY = FALSE)
+    return(res)
+}
+
+
+con_preds_error <- function(clus_pred, asact_pred, cum_pred, orig_con) {
+    #' Calculate the error
+
     ## We need to cut down all the series to the minimum length of our predictions
     min_length <- length(cum_pred[[1]])
 
@@ -293,16 +443,13 @@ con_preds <- function(train, test, cluster, clustering, shape, shape_series, ...
     real_con <- lapply(orig_con, function(x) trim_ts(x, length(x) - min_length, how = "start"))
 
     ## Calculate the error by comparing the the real consumption
-    clus_err <- mapply(function(x,y) error_calc(x, y, "rmse"), clus_pred, real_con, SIMPLIFY = FALSE)
-    asact_err <- mapply(function(x,y) error_calc(x, y, "rmse"), asact_pred, real_con, SIMPLIFY = FALSE)
-    cum_err <- mapply(function(x,y) error_calc(x, y, "rmse"), cum_pred, real_con, SIMPLIFY = FALSE)
+    clus_rmse <- mapply(function(x,y) error_calc(x, y, "rmse"), real_con, clus_pred, SIMPLIFY = FALSE)
+    asact_rmse <- mapply(function(x,y) error_calc(x, y, "rmse"),real_con, asact_pred, SIMPLIFY = FALSE)
+    cum_rmse <- mapply(function(x,y) error_calc(x, y, "rmse"), real_con, cum_pred, SIMPLIFY = FALSE)
 
-    res <- mapply(list,
-                  clus = mapply(list, pred = clus_pred, err = clus_err, SIMPLIFY = FALSE),
-                  asact = mapply(list, pred = asact_pred, err = asact_err, SIMPLIFY = FALSE),
-                  cum = mapply(list, pred = cum_pred, err = cum_err, SIMPLIFY = FALSE),
-                  SIMPLIFY = FALSE)
-    return(res)
+    clus_mase <- mapply(function(x,y) error_calc(x, y, "mase"), real_con, clus_pred, SIMPLIFY = FALSE)
+    asact_mase <- mapply(function(x,y) error_calc(x, y, "mase"), real_con, asact_pred, SIMPLIFY = FALSE)
+    cum_mase <- mapply(function(x,y) error_calc(x, y, "mase"), real_con, cum_pred, SIMPLIFY = FALSE)
 }
 
 

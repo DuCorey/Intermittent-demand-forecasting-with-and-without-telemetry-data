@@ -2,37 +2,29 @@
 #' comments: Code for the third paper
 #' author: Corey Ducharme / corey.ducharme@polymtl.ca
 
-#' work directory
+#' Work directory
 setwd("/home/corey/AL/code")
 packrat::init()
 
-#' packages
-library(parallel)
+#' Packages
+library(ggplot2)
 
-#' imports
-source("state_event.R")
+#' Sourcing
 source("data.R")
-source("error.R")
-source("matching.R")
-source("ADIDA.R")
-source("intermittent.R")
-source("cluster.R")
+source("con_del_models.R")
+source("state_event.R")
 source("ndusl.R")
 source("forecast.R")
-source("purrr.R")
-source("dtwclust.R")
-source("plots.R")
+source("intermittent.R")
 
 #' Load data
 data_3 <- readRDS("../data/master/data_paper3.rds")
 
 ## Create the clus_tel_day data object for paper 3
-## Filter time series with a minimun of 2 years
-cvd <- readRDS("../data/master/client.rds") %>%
-    filter_cvd
+## Filter time series with a minimun of 3 years
+cvd <- filter_cvd(readRDS("../data/master/client.rds"))
 
-
-make_data_3 <- function(cvd, source, time_scale) {
+con_del_data_3 <- function(cvd, source, time_scale) {
     ## Get the data
     print("Fetching delivery series")
     del_orig <- lapply(cvd, client_del_xts, source = source, time_scale = time_scale)
@@ -40,78 +32,67 @@ make_data_3 <- function(cvd, source, time_scale) {
     print("Fetching consumption series")
     con_orig <- lapply(cvd, client_con_xts, time_scale = time_scale)
 
-    ## Combine both truth series of not null values for del and con
-    f <- function(x) length(x) >= 732
-    ind <- sapply(del_orig, f) & sapply(con_orig, f)
+    ## Filter out customers that do not have a full year for 2016 and the second half of 2015
+    print("Filtering data")
+    filter_f_1 <- function(x) filter_full_year(x, "days", "2016")
+    del_filt_1 <- lapply(del_orig, filter_f_1)
+    con_filt_1 <- lapply(con_orig, filter_f_1)
+
+    filter_f_2 <- function(x) filter_full_quarter(x, 3, "2015")
+    del_filt_2 <- lapply(del_orig, filter_f_2)
+    con_filt_2 <- lapply(con_orig, filter_f_2)
+
+    filter_f_3 <- function(x) filter_full_quarter(x, 4, "2015")
+    del_filt_3 <- lapply(del_orig, filter_f_3)
+    con_filt_3 <- lapply(con_orig, filter_f_3)
+
+    ## Removing the null from the outputs
+    f <- not %c% is.null
+    ind <- sapply(del_filt_1, f) & sapply(con_filt_1, f) & sapply(del_filt_2, f) & sapply(con_filt_2, f) & sapply(del_filt_3, f) & sapply(con_filt_3, f)
     cvd <- cvd[ind]
     del_orig <- del_orig[ind]
     con_orig <- con_orig[ind]
 
-    del_orig <- mapply(list, orig = del_orig, SIMPLIFY = FALSE)
-    con_orig <- mapply(list, orig = con_orig, SIMPLIFY = FALSE)
-    res <- mapply(list, cvd = cvd, del = del_orig, con = con_orig, SIMPLIFY = FALSE)
+    ## Filter out customers that do not have a minimum of 2 observations in the second half
+    ## 2015. These customers cannot be used for forecasting using Croston's method.
+    ## Run this filter after the first one since we have to make sure that the second half
+    ## of 2015 is available
+    filter_f_4 <- function(x) sum(x[xts_range("2015-07-01", "2015-12-31")] != 0) >= 2
+    ind <- sapply(del_orig, filter_f_4)
+    cvd <- cvd[ind]
+    del_orig <- del_orig[ind]
+    con_orig <- con_orig[ind]
+
+    ## Keep data from 2nd half of 2015 to 2016 inclusively of everyone who has a full year in 2016
+    f <- function(x) x[xts_range("2015-07-01", "2016-12-31")]
+    del_filt <- lapply(del_orig, f)
+    con_filt <- lapply(con_orig, f)
+
+    ## Structuring the final output so  that it's a list
+    f <- function(cvd, del_orig, del_filt, con_orig, con_filt) {
+        structure(
+            list(
+                cvd = cvd,
+                con = list(orig = con_orig, filt = con_filt),
+                del = list(orig = del_orig, filt = del_filt)
+            ),
+            class = "ConDelData"
+        )
+    }
+    res <- mapply(f, cvd, del_orig, del_filt, con_orig, con_filt, SIMPLIFY = FALSE)
     return(res)
 }
 
-
-data_3 <- make_data_3(cvd, "tel", "days")
+data_3 <- con_del_data_3(cvd, "tel", "days")
 saveRDS(data_3, "../data/master/data_paper3.rds")
-data_3 <- readRDS("../data/master/data_paper3.rds")
 
 
-reattribute_data_3 <- function(client) {
-    #' Move the cvd, del, and con attributes of the data under a "data"
-    #' heading
-    print(client$data$cvd$DP)
-    if (is.list(client$data)) {
-        ## No need to reattribute the data, it's already there
-        return(client)
-    } else {
-        cvd <- client$cvd
-        del <- client$del
-        con <- client$con
-        return(
-            structure(
-                list(
-                    data = list(cvd = cvd, del = del, con = con)
-                )
-            )
-        )
-    }
-}
-
-
-real_next_day_under_safety_level_list <- function(del_list, start_tel_list, con,
-                                                  safety_level) {
-    #' Determine the ndusl if the input deliveries are a list
-    #' This means that the starting telemetry must also be a list
-    #' Con is a time series that covers the entire available time
-    mapply(del_list, start_tel_list,
-           FUN = function(del, starting_tel) {
-               tryCatch({
-                   amount <- 0
-                   a <- 0
-                   safety_stock <- starting_tel - safety_level
-                   while (amount <= safety_stock) {
-                       a <- a + 1
-                       amount <- amount + as.numeric(con[del + a])
-                   }
-                   return(a)
-               },
-               ## If the loop goes out-of-bounds we catch and return NA
-               ## The loop goes out of bounds if there isn't any consumption
-               ## data available at that date
-               error = function(cond) {
-                   return(NA)
-               })
-           })
-}
-
-
+## Adding data about each clients deliveries and the NDUSL following paper 2
 add_test_del_list <- function(client) {
-    #' Add the client's delivery list in the test data
-    del_real <- client$data$del$orig
-    test <- tail(del_real, 365)
+    #' Add the client's delivery list
+    #' The whole year of 2016
+    del_real <- client$del$filt
+    test <- tail(del_real, 366)  # leap year
     del_list <- index(test[test > 0])
     client$test$del_list <- del_list
 
@@ -132,7 +113,7 @@ add_start_tel <- function(client) {
     start_tel <- sapply(del_list,
                         FUN = function(del) {
                             tryCatch({
-                                peak_tel_at_del(del, get_client_telemetry(client$data$cvd))
+                                peak_tel_at_del(del, get_client_telemetry(client$cvd))
                             },
                             error = function(cond) {
                                 ## we can get out of bonds of the telemetry list
@@ -142,115 +123,151 @@ add_start_tel <- function(client) {
                             })
                         })
 
-    ## Filter out the del_list if any are values are NA from the start_tel since
-    ## we can't compare to the ground truth
-    ind <- !is.na(start_tel)
-    client$test$del_list <- del_list[ind]
-    client$ndusl$start_tel <- start_tel[ind]
+    client$ndusl$start_tel <- start_tel
 
     return(client)
 }
 
 
-add_safety_level <- function(client) {
-    safety_level <- get_client_safety_level(client$data$cvd, a = 0.1)
-    client$ndusl$safety_level <- safety_level
-
-    return(client)
-}
-
-
-add_ndusl_real <- function(client) {
-    #' Forecast the ndusl using the true consumption data
-    del_list <- client$test$del_list
-    start_tel <- client$ndusl$start_tel
-    real_con <- client$data$con$orig
-    safety_level <- client$ndusl$safety_level
-
-    ndusl_real <- real_next_day_under_safety_level_list(del_list, start_tel,
-                                                        real_con, safety_level)
-
-    ## Filter out the del_list if any are values are NA from the ndusl_real since
-    ## we can't compare to the ground truth
-    ind <- !is.na(ndusl_real)
-    client$test$del_list <- del_list[ind]
-    client$ndusl$start_tel <- start_tel[ind]
-    client$ndusl$real <- ndusl_real[ind]
-
-    return(client)
-}
-
-
-## Preparing for the forecasts
 data_3 <- end_state(data_3, list(c(add_test_del_list, "apply"),
-                                 c(add_start_tel, "parallel", 8),
-                                 c(add_safety_level, "apply"),
-                                 c(add_ndusl_real, "parallel", 8)))
+                                 c(add_start_tel, "parallel", 8)))
 
-## Filter out some customers because they cause errors that can't be fixed.
-## There's some large underlying problem with their data
-blacklist <- c("70346",  # Has deliveries that last multiple days
-               "12903")  # Doesn't have any consumption after the deliveries
-
-data_3 <- Filter(function(x) !(x$data$cvd$DP %in% blacklist), data_3)
-
-remove_0_ndusl <- function(client) {
-    ## Remove occurences of real ndusl with 0 time.
-    ## These are really small bugs that can still occur.
-    ndusl <- client$ndusl$real
-    ind <- !(ndusl == 0)
-
-    client$ndusl$real <- ndusl[ind]
-    client$ndusl$start_tel <- client$ndusl$start_tel[ind]
-    client$test$del_list <- client$test$del_list[ind]
-
-    return(client)
-}
-
-
-add_initial_guess_list <- function(client) {
-    client$ndusl$guess_list <- client$ndusl$real * 2
-    return(client)
-}
-
+## Check the NAs in the start_tel
+sapply(data_3, function(x) any(is.na(x$ndusl$start_tel)))
 
 saveRDS(data_3, "../data/master/data_paper3.rds")
-data_3 <- readRDS("../data/master/data_paper3.rds")
 
 
-################################################################################
-## NDUSL ##
-################################################################################
+## Determine the actual max_level that can be sent to a client
+## Maximum between the highest measured level at a customer's site and the
+## max level of the tank
+## Filtering based on inconsistent max tank levels
+## Errors between the max tank level and the read telemetry amount
 
-con_real_forecast_train_data <- function(client, del, extra = 0) {
-    #' For a given delivery date what is the forecast data
-    ## Forecasts on the real consumption data.
-    ## This is the best case scenario using all available historical telemetry
-    con_real <- client$data$con$orig
-    train <- con_real[xts_range(start(con_real), del + extra)]
-    return(train)
+relative_difference <- function(x, ref) {
+    (x - ref)/ref
 }
 
+sapply(data_3, function(x) relative_difference(max(x$ndusl$start_tel), get_client_max_level(x$cvd)))
+data_3 <- Filter(function(x) relative_difference(max(x$ndusl$start_tel), get_client_max_level(x$cvd)) < 0.2, data_3)
 
-AL_forecast_train_data <- function(client, del, extra = 0) {
-    #' For a given delivery date what is the forecast data
-    ## Forecasts on 1 month of the real forecast data.
-    ## This is the current AL stategy.
-    train <- tail(con_real_forecast_train_data(client, del + extra), 31 + extra)
 
-    return(train)
+add_max_tel_level <- function(client) {
+    client$ndusl$max_tel <- max(max(client$ndusl$start_tel), get_client_max_level(client$cvd))
+
+    return(client)
 }
 
+data_3 <- lapply(data_3, add_max_tel_level)
 
-del_real_forecast_train_data <- function(client, del, extra = 0) {
-    #' For a given delivery date what is the forecast data
-    ## Forecasts on the historical delivery data only
-    ## This uses our modls for transforming intermittent delivery data into
-    ## consumption data.
-    del_real <- client$data$del$orig
-    train <- del_real[xts_range(start(del_real), del + extra)]
+saveRDS(data_3, "../data/master/data_paper3.rds")
 
-    return(train)
+###############################
+## Descriptive stats
+###############################
+## Number of clients
+length(data_3)
+
+## Tukey
+## Croston decomposition
+## Run these after in case of NA's produced by the time shift
+tukey_decomp_table(pluck_list(data_3, "del", "filt"))
+tukey_decomp_table(pluck_list(data_3, "con", "filt"))
+
+## Time series categorisations
+intermittent_categorisation(
+    pluck_list(data_3, "del", "filt"),
+    type = "PKa",
+    outplot = "none"
+)
+
+intermittent_categorisation(
+    pluck_list(data_3, "con", "filt"),
+    type = "PKa",
+    outplot = "none"
+)
+
+
+#############################
+## Simultation functions
+#############################
+perfect_ndusl_simulation <- function(client, safety_level = 0) {
+    #' Simulate the NDUSL for a customer where we delivery the max amount in the
+    #' tank the day before we would be under the safety level.
+
+    #' Algorithm function
+    ##' After the delivery at t, we calculate the NDUSL.
+    ##' The day right before the NDUSL is our new delivery date.
+    ##' The amount delivered on that date is the consummed amount including the
+    ##' delivery day.
+    ##' The telemetry of the day after the delivery is the max amount allowed in stock.
+    ##' We then calculate the NDUSL following the new delivery at the new telemetry.
+
+    ## We start the telemetry first day of 2016-01-01
+    ## Then calculate the deliveries when they happen at the day before NDUSL
+    ## Calculate the time for the next delivery and the delivered amount
+    ## We deliver the day right before we reach the ndusl.
+    ## We always deliver up to the max stock.
+    ## The amount we deliver includes the  amount that would have been consummed
+    ## the day of the delivery.
+
+    max_level <- client$ndusl$max_tel
+    safety_level <- safety_level * max_level
+
+    ## First iteration
+    con <- client$con$filt
+    del <- as.Date("2015-12-31")
+    start_tel <- last_tel_reading_of_day(del, client$cvd)
+    res <- day_before_safety_level(con, del, start_tel, safety_level)
+
+    next_del <- res$date
+    del_amount <- res$amount
+    ## Fix the first delivery amount by adding up to the max
+    del_amount <- del_amount + max_level - start_tel
+
+    ## init result list
+    ## The first ndusl is biased since it was not done at max
+    ## but the first del_amount is not biased
+    dels <- c(next_del)
+    dels_amount <- c(del_amount)
+
+    ## Set the starting telementry to be the max level
+    start_tel <- max_level
+    i <- 2
+
+    while (TRUE) {
+        start <- dels[[i-1]]
+        res <- day_before_safety_level(con, start, start_tel, safety_level)
+
+        if(is.na(res)) {
+            break
+        }
+
+        dels[[i]] <- res$date
+        dels_amount[[i]] <- res$amount
+        i <- i+1
+    }
+
+    ## Remove the first ndusl since it is biased
+    ## dels_date <- tail(dels_date, -1)
+    ## dels_amount <- tail(dels_amount, -1)
+    ## real_dates <- tail(client$test$del_list, -1)
+
+    ## Determine the real delivery amounts
+    del_real <- client$del$orig
+    real_dates <- client$test$del_list
+    real_amounts <- as.numeric(del_real[index(del_real) %in% real_dates])
+
+
+    structure(
+        list(
+            dates = dels,
+            amounts = dels_amount,
+            real_dates = real_dates,
+            real_amounts = real_amounts
+        ),
+        class = "NDUSLsimulation"
+    )
 }
 
 
@@ -280,7 +297,7 @@ try_ndusl_forecast <- function(fmodel, guess, start_tel, safety_level) {
 
     tryCatch({
         res <- result_forecast(forecast(fmodel, guess))
-        error <- next_day_under_safety_level(res, start_tel, safety_level)
+        error <- day_before_safety_level(res, start_tel, safety_level)
         return(
             structure(
                 list(h = guess, ndusl = error, model = compact_forecast(fmodel))
@@ -305,842 +322,833 @@ try_ndusl_forecast <- function(fmodel, guess, start_tel, safety_level) {
 }
 
 
-get_client_ndusl_forecast <- function(client, ffun, dfun, ...) {
-    #' Add a forecast for the ndusl
-    #' ffun : forecasting function
-    #' dfun : training data function
-    #' ... : a list of parameters arguments to iterate over when updating the model
-    del_list <- client$test$del_list
-    safety_level <- client$ndusl$safety_level
-    start_tel_list <- client$ndusl$start_tel
+con_real_forecast_train_data <- function(client, del, extra = 0) {
+    #' For a given delivery date what is the forecast data
+    ## Forecasts on the real consumption data.
+    ## This is the best case scenario using all available historical telemetry
+    con_real <- client$con$filt
+    train <- con_real[xts_range(start(con_real), del + extra)]
+    return(train)
+}
 
-    guess_list <- client$ndusl$guess_list
 
-    ## Initial forecast model
-    dots <- list(...)
-    if (length(dots) == 0) {
-        init_model <- ffun(dfun(client, del_list[[1]]))
+del_real_forecast_train_data <- function(client, del, extra = 0) {
+    #' For a given delivery date what is the forecast data
+    ## Forecasts on the historical delivery data only
+    ## This uses our modls for transforming intermittent delivery data into
+    ## consumption data.
+    del_real <- client$del$filt
+    train <- del_real[xts_range(start(del_real), del + extra)]
+
+    return(train)
+}
+
+
+compare_sim_results <- function(max_level, start_tel, overfilling, start_date, safety_lead_time, real = NA, sim = NA, emer = NA) {
+    ## Compare the result of our predicted out-of-stock to the real out-of-stock
+    ## The delivery done is for our forecasted amount, unless there is an out-of-stock
+    ## in that case we emergency deliver the max amount
+    ## The type of delivery
+    ## 0L : standard delivery
+    ## 1L : emergency delivery
+    ## 2L : service interuption delivery
+    type <- NA  # defaut
+    if (is.na(sim) & is.na(real) & is.na(emer)) {
+        stop("Not comparing any results")
+    } else if (!is.na(emer)) {
+        ## We have to perform an emergency delivery to go back up above the
+        ## safety level
+        del_date <- emer$date
+        del_amount_pred <- emer$pred_stock + max_level - start_tel
+        del_amount_real <- emer$real_stock + max_level - start_tel
+        type <- 1L
+        next_start_tel <- start_tel - emer$real_stock + del_amount_pred
+    } else if (is.na(sim) & !is.na(real)) {
+        ## We are late, our simulation went out-of-bounds, but the reality is
+        ## we needed to deliver earlier
+        del_date <- real + 1
+        del_amount_pred <- max_level
+        del_amount_real <- max_level
+        type  <- 2L
+        next_start_tel <- max_level
+    } else if (!is.na(sim) & is.na(real)) {
+        ## Our simulation exists, but the real value is out-of-bonds, we are early
+        del_date <- sim$date
+        del_amount_pred <- sim$pred_stock_con + max_level - start_tel
+        del_amount_real <- sim$real_stock_con + max_level - start_tel
+        next_start_tel <- start_tel - sim$real_stock_con + del_amount_pred
+    } else if (sim$date > real) {
+        ## We are late, that's bad.
+        ## The customer calls us to tell us that he's out of stock.
+        ## We deliver the same day
+        del_date <- real + 1
+        del_amount_pred <- max_level
+        del_amount_real <- max_level
+        type <- 2L
+        next_start_tel <- max_level
+    } else if (sim$date <= real) {
+        ## We are either early, or exactly on time
+        ## So we deliver following our forecast
+        del_date <- sim$date
+        del_amount_pred <- sim$pred_stock_con + max_level - start_tel
+        del_amount_real <- sim$real_stock_con + max_level - start_tel
+        next_start_tel <- start_tel - sim$real_stock_con + del_amount_pred
     } else {
-        init_model <- ffun(dfun(client, del_list[[1]]), ...[[1]])
+        stop('Unspecified case when comparing forecasted and real results')
     }
 
-    res <- mapply(del_list, start_tel_list, guess_list, ...,
-                  FUN = function(del, start_tel, guess, ...) {
-                      train <- dfun(client, del)
-                      tryCatch({
-                          fmodel <- update(init_model, train, ...)
-                      },
-                      error = {
-                          ## Possible that the new data causes the model to have an error
-                          ## As such we recalculate the whole model. This new
-                          ## model then becomes our init_model for the rest of
-                          ## the forecasts.
-                          init_model <<- ffun(train, ...)
-                          fmodel <- init_model
-                      })
-                      error <- try_ndusl_forecast(fmodel, guess, start_tel, safety_level)
-                      return(error)
-                  },
-                  SIMPLIFY = TRUE,
-                  USE.NAMES = FALSE)
-
-    return(res)
-}
-
-## Example NTUSS series
-client <- data_3[[1]]
-del <- client$test$del_list[[1]]
-start_tel <- client$ndusl$start_tel[[1]]
-guess <- client$ndusl$guess_list[[1]]
-safety_level <- client$ndusl$safety_level
-
-real_ndusl <- client$ndusl$real[[1]]
-real_ndusl
-del + real_ndusl
-
-con_data <- tail(con_real_forecast_train_data(client, del, 15), 20)
-del_data <- tail(del_real_forecast_train_data(client, del, 15), 20)
-
-foo <- convert_xts_daily(get_client_telemetry(client$data$cvd), first)
-tel_data <- foo[xts_range(del, del + 15)]
-
-data <- join_all(list(fortify(con_data), fortify(del_data), fortify(tel_data)))
-
-
-data$future <- NA
-data$future[15] <- data$tel_data[15]
-data$future[16] <- data$tel_data[15] - data$con_data[15] - 1.5
-data$future[17] <- data$future[16] - data$con_data[16] - 1.5
-data$future[18] <- data$future[17] - data$con_data[17]
-
-breaks <- sort(c(del, del + real_ndusl))
-
-ggplot(data = data, aes(x = Index)) +
-    geom_bar(aes(y = del_data, fill = "Delivery"), stat = "identity", width = 0.5) +
-    geom_line(aes(y = con_data, linetype = "Consumption", colour = "Consumption")) +
-    geom_line(aes(y = tel_data, linetype = "Telemetry", colour = "Telemetry")) +
-    geom_line(aes(y = safety_level, linetype = "Safety Stock level", colour = "Safety Stock level")) +
-    geom_line(aes(y = future, linetype = "Projected Telemetry", color = "Projected Telemetry")) +
-    theme_bw() +
-    scale_linetype_manual(name = "Legend", values = c("Consumption" = "longdash", "Telemetry" = "solid", "Safety Stock level" = "solid", "Projected Telemetry" = "solid")) +
-    scale_fill_manual(name = "Legend", values = c("Delivery" = "grey")) +
-    scale_color_manual(name = "Legend", values = c("Consumption" = "grey50", "Telemetry" = "black", "Safety Stock level" = "red", "Projected Telemetry" = "blue")) +
-    theme(legend.key = element_blank(),
-          legend.title = element_blank(),
-          legend.box = "horizontal",
-          legend.position = "top") +
-    scale_x_date(breaks = breaks, date_labels =c("Date 1", "Date 2")) +
-    theme(axis.title.x = element_blank(),
-          text = element_text(size = 9)) +
-    ylab("Amount") +
-    annotate("errorbarh", y = 25, xmin = del, xmax = del + real_ndusl, height = 5) +
-    annotate("text", x = del + real_ndusl/2, y = 30, label = "NTUSS", size = 3)
-
-ggsave("./papers/paper3/series.eps", device = cairo_ps, width = 190, height = 80, units = "mm", dpi = 1000)
-ggsave("./papers/paper3/series.png", device = "png", width = 190, height = 80, units = "mm", dpi = 1000)
-
-
-## In POSIXct
-client <- data_3[[1]]
-del <- client$test$del_list[[1]]
-start_tel <- client$ndusl$start_tel[[1]]
-guess <- client$ndusl$guess_list[[1]]
-safety_level <- client$ndusl$safety_level
-
-real_ndusl <- client$ndusl$real[[1]]
-real_ndusl
-del + real_ndusl
-
-con_data <- tail(con_real_forecast_train_data(client, del, 15), 20)
-del_data <- tail(del_real_forecast_train_data(client, del, 15), 20)
-
-foo <- convert_xts(get_client_telemetry(client$data$cvd))
-
-tel_data <- head(foo[xts_range(start(con_data), end(con_data))], -20)
-
-data <- join_all(list(fortify(con_data), fortify(del_data)))
-
-data$Index <- as.POSIXct(as.character(data$Index))
-
-data$future <- NA
-data$future[15] <- 47.10
-data$future[16] <- data$future[15] - data$con_data[15] - 1.5
-data$future[17] <- data$future[16] - data$con_data[16] - 1.5
-data$future[18] <- data$future[17] - data$con_data[17]
-
-breaks <- sort(c(as.POSIXct(as.character(del)), as.POSIXct(as.character(del + real_ndusl))))
-
-ggplot(data = data, aes(x = Index)) +
-    geom_col(aes(y = del_data, fill = "Delivery")) +
-    geom_line(aes(y = con_data, linetype = "Consumption", colour = "Consumption")) +
-    geom_line(data = fortify(tel_data), aes(x = Index, y = tel_data, linetype = "Telemetry", colour = "Telemetry")) +
-    geom_line(aes(y = safety_level, linetype = "Safety Stock level", colour = "Safety Stock level")) +
-    geom_line(aes(y = future, linetype = "Projected Telemetry", color = "Projected Telemetry")) +
-    theme_bw() +
-    scale_linetype_manual(name = "Legend", values = c("Consumption" = "longdash", "Telemetry" = "solid", "Safety Stock level" = "solid", "Projected Telemetry" = "solid")) +
-    scale_fill_manual(name = "Legend", values = c("Delivery" = "grey")) +
-    scale_color_manual(name = "Legend", values = c("Consumption" = "grey50", "Telemetry" = "black", "Safety Stock level" = "red", "Projected Telemetry" = "blue")) +
-    theme(legend.key = element_blank(),
-          legend.title = element_blank(),
-          legend.box = "horizontal",
-          legend.position = "top") +
-    scale_x_datetime(breaks = breaks, date_labels = c("Date 1", "Date 2")) +
-    theme(axis.title.x = element_blank(),
-          text = element_text(size = 9)) +
-    ylab("Amount") +
-    annotate("errorbarh", y = 25, xmin = as.POSIXct(as.character(del)), xmax = as.POSIXct(as.character(del + real_ndusl)), height = 5) +
-    annotate("text", x = as.POSIXct(as.character(del + real_ndusl/2)), y = 30, label = "NTUSS", size = 3)
-
-ggsave("./papers/paper3/series.eps", device = cairo_ps, width = 190, height = 80, units = "mm", dpi = 1000)
-ggsave("./papers/paper3/series.png", device = "png", width = 190, height = 80, units = "mm", dpi = 1000)
-
-
-
-## Descriptive statistics on the data
-length(data_3)
-
-## Tukey
-## Croston decomposition
-## Run these after in case of NA's produced by the time shift
-decomps_del <- lapply(pluck_list(data_3, "data", "del", "orig"),
-                      crost_decomp)
-decomps_con <- lapply(pluck_list(data_3, "data", "con", "orig"),
-                      crost_decomp)
-
-tukey_decomp_table(pluck_list(data_3, "data", "del", "orig"))
-tukey_decomp_table(pluck_list(data_3, "data", "con", "orig"))
-
-## Time series categorisations
-intermittent_categorisation(
-    pluck_list(data_3, "data", "del", "orig"),
-    type = "PKa",
-    outplot = "none"
-)
-
-con_cat <- intermittent_categorisation(
-    pluck_list(data_3, "data", "con", "orig"),
-    type = "PKa",
-    outplot = "none"
-)
-
-
-## Distribution of the number of deliveries for each client
-n_dels <- sapply(data_3, function(x) length(x$test$del_list))
-sum(n_dels)
-mean(n_dels)
-
-### Sum of all the outliers
-sum(n_dels > quantile(n_dels, 0.75) + 1.5*IQR(n_dels))
-foo <- sum(n_dels[n_dels > quantile(n_dels, 0.75) + 1.5*IQR(n_dels)])
-foo/sum(n_dels)
-
-
-### Bottom whisker is negative so not necessary
-quantile(n_dels, 0.25) - 1.5*IQR(n_dels)
-
-### Pareto plot
-### Make buckets of based on the divisors 26, 38, 52
-pareto_curve(n_dels, xlab = "Customers", ylab = "Deliveries") +
-    theme(text = element_text(size = 7))
-
-pareto_plot(n_dels, 52, "Customer groups", "Deliveries") +
-
-ggsave("./papers/paper3/dels_pareto.eps", device = cairo_ps, width = 90, height = 90, units = "mm", dpi = 1000)
-ggsave("./papers/paper3/dels_pareto.png", device = "png", width = 90, height = 90, units = "mm", dpi = 1000)
-
-## Real NDUSL
-foo <- do.call(c, (sapply(data_3, function(x) x$ndusl$real)))
-min(foo)
-max(foo)
-
-sum(foo)
-ggplot(mapping = aes(foo)) +
-    geom_histogram(binwidth = 3, bins = 30) +
-    xlab("NTUSS (days)") +
-    theme_bw() +
-    theme(text = element_text(size = 7))
-
-ggsave("./papers/paper3/ndusl_dist.eps", device = cairo_ps, width = 90, height = 90, units = "mm", dpi = 1000)
-ggsave("./papers/paper3/ndusl_dist.png", device = "png", width = 90, height = 90, units = "mm", dpi = 1000)
-
-
-## NDUSL forecasts
-### Consumption models
-f_con_ses <- partial(get_client_ndusl_forecast,
-                     ffun = ses,
-                     dfun = con_real_forecast_train_data)
-con_ses_ndusl <- mclapply(data_3, f_con_ses, mc.cores = 8)
-saveRDS(con_ses_ndusl, "../data/master/paper3_forecast/con_ses.rds")
-
-f_con_croston_base <- partial(get_client_ndusl_forecast,
-                              ffun = partial(croston, f.type = "SBA.base"),
-                              dfun = con_real_forecast_train_data)
-con_croston_base_ndusl <- mclapply(data_3, f_con_croston_base, mc.cores = 8)
-saveRDS(con_croston_base_ndusl, "../data/master/paper3_forecast/con_crostonbase.rds")
-
-f_con_croston_opt <- partial(get_client_ndusl_forecast,
-                             ffun = partial(croston, f.type = "SBA.opt"),
-                             dfun = con_real_forecast_train_data)
-con_croston_opt_ndusl <- mclapply(data_3, f_con_croston_opt, mc.cores = 8)
-saveRDS(con_croston_opt_ndusl, "../data/master/paper3_forecast/con_crostonopt.rds")
-
-f_con_ets <- partial(get_client_ndusl_forecast,
-                     ffun = ets,
-                     dfun = con_real_forecast_train_data)
-con_ets_ndusl <- mclapply(data_3, f_con_ets, mc.cores = 8)
-saveRDS(con_ets_ndusl, "../data/master/paper3_forecast/con_ets.rds")
-
-f_con_ADIDA_weekly <- partial(get_client_ndusl_forecast,
-                              ffun = partial(ADIDA,
-                                             binsize = 7 + 1,
-                                             ffun = partial(croston, f.type = "SBA.opt")),
-                              dfun = con_real_forecast_train_data)
-con_ADIDA_weekly_ndusl <- mclapply(data_3, f_con_ADIDA_weekly, mc.cores = 8)
-saveRDS(con_ADIDA_weekly_ndusl, "../data/master/paper3_forecast/con_ADIDA_weekly.rds")
-
-f_con_ADIDA_monthly <- partial(get_client_ndusl_forecast,
-                              ffun = partial(ADIDA,
-                                             binsize = 30 + 1,
-                                             ffun = partial(croston, f.type = "SBA.opt")),
-                              dfun = con_real_forecast_train_data)
-con_ADIDA_monthly_ndusl <- mclapply(data_3, f_con_ADIDA_monthly, mc.cores = 8)
-saveRDS(con_ADIDA_monthly_ndusl, "../data/master/paper3_forecast/con_ADIDA_monthly.rds")
-
-f_con_ASACT_weekly <- partial(get_client_ndusl_forecast,
-                              ffun = partial(ASACT,
-                                             agg.time = 7,
-                                             ffun = ets,
-                                             h = 7),
-                              dfun = con_real_forecast_train_data)
-con_smooth_crost_opt_models <- lapply(con_croston_opt_ndusl, function(x) x["model",])
-con_ASACT_weekly_ndusl <- mcmapply(data_3,
-                                   con_smooth_crost_opt_models,
-                                   FUN = f_con_ASACT_weekly,
-                                   mc.cores = 8)
-saveRDS(con_ASACT_weekly_ndusl, "../data/master/paper3_forecast/con_ASACT_weekly.rds")
-
-f_con_ASACT_monthly <- partial(get_client_ndusl_forecast,
-                               ffun = partial(ASACT,
-                                              agg.time = 30,
-                                              ffun = ets,
-                                              h = 7),
-                               dfun = con_real_forecast_train_data)
-con_smooth_crost_opt_models <- lapply(con_croston_opt_ndusl, function(x) x["model",])
-con_ASACT_monthly_ndusl <- mcmapply(data_3,
-                                    con_smooth_crost_opt_models,
-                                    FUN = f_con_ASACT_monthly,
-                                    mc.cores = 8)
-saveRDS(con_ASACT_monthly_ndusl, "../data/master/paper3_forecast/con_ASACT_monthly.rds")
-
-f_con_MAPA <- partial(get_client_ndusl_forecast,
-                      ffun = partial(MAPA,
-                                     agg = 7),
-                      dfun = con_real_forecast_train_data)
-con_MAPA_ndusl <- mclapply(data_3, f_con_MAPA, mc.cores = 8)
-saveRDS(con_MAPA_ndusl, "../data/master/paper3_forecast/con_MAPA.rds")
-
-
-### Delivery models
-f_del_ses <- partial(get_client_ndusl_forecast,
-                     ffun = ses,
-                     dfun = del_real_forecast_train_data)
-del_ses_ndusl <- mclapply(data_3, f_del_ses, mc.cores = 8)
-saveRDS(del_ses_ndusl, "../data/master/paper3_forecast/del_ses.rds")
-
-f_del_croston_base <- partial(get_client_ndusl_forecast,
-                              ffun = partial(croston, f.type = "SBA.base"),
-                              dfun = del_real_forecast_train_data)
-del_croston_base_ndusl <- mclapply(data_3, f_del_croston_base, mc.cores = 8)
-saveRDS(del_croston_base_ndusl, "../data/master/paper3_forecast/del_crostonbase.rds")
-
-f_del_croston_opt <- partial(get_client_ndusl_forecast,
-                             ffun = partial(croston, f.type = "SBA.opt"),
-                             dfun = del_real_forecast_train_data)
-del_croston_opt_ndusl <- mclapply(data_3, f_del_croston_opt, mc.cores = 8)
-saveRDS(del_croston_opt_ndusl, "../data/master/paper3_forecast/del_crostonopt.rds")
-
-f_del_ets <- partial(get_client_ndusl_forecast,
-                     ffun = ets,
-                     dfun = del_real_forecast_train_data)
-del_ets_ndusl <- mclapply(data_3, f_del_ets, mc.cores = 8)
-saveRDS(del_ets_ndusl, "../data/master/paper3_forecast/del_ets.rds")
-
-f_del_ADIDA_weekly <- partial(get_client_ndusl_forecast,
-                              ffun = partial(ADIDA,
-                                             binsize = 7 + 1,
-                                             ffun = partial(croston, f.type = "SBA.opt")),
-                              dfun = del_real_forecast_train_data)
-
-del_ADIDA_weekly_ndusl <- mclapply(data_3, f_del_ADIDA_weekly, mc.cores = 8)
-saveRDS(del_ADIDA_weekly_ndusl, "../data/master/paper3_forecast/del_ADIDA_weekly.rds")
-
-
-f_del_ADIDA_monthly <- partial(get_client_ndusl_forecast,
-                               ffun = partial(ADIDA,
-                                              binsize = 30 + 1,
-                                              ffun = partial(croston, f.type = "SBA.opt")),
-                               dfun = del_real_forecast_train_data)
-del_ADIDA_monthly_ndusl <- mclapply(data_3, f_del_ADIDA_monthly, mc.cores = 8)
-saveRDS(del_ADIDA_monthly_ndusl, "../data/master/paper3_forecast/del_ADIDA_monthly.rds")
-
-f_del_ASACT_weekly <- partial(get_client_ndusl_forecast,
-                              ffun = partial(ASACT,
-                                             agg.time = 7,
-                                             ffun = ets,
-                                             h = 7),
-                              dfun = del_real_forecast_train_data)
-del_smooth_crost_opt_models <- lapply(del_croston_opt_ndusl, function(x) x["model",])
-del_ASACT_weekly_ndusl <- mcmapply(data_3,
-                                   del_smooth_crost_opt_models,
-                                   FUN = f_del_ASACT_weekly,
-                                   mc.cores = 8)
-saveRDS(del_ASACT_weekly_ndusl, "../data/master/paper3_forecast/del_ASACT_weekly.rds")
-
-f_del_ASACT_monthly <- partial(get_client_ndusl_forecast,
-                               ffun = partial(ASACT,
-                                              agg.time = 30,
-                                              ffun = ets,
-                                              h = 7),
-                               dfun = del_real_forecast_train_data)
-smooth_crost_opt_models <- lapply(del_croston_opt_ndusl, function(x) x["model",])
-del_ASACT_monthly_ndusl <- mcmapply(data_3,
-                                    smooth_crost_opt_models,
-                                    FUN = f_del_ASACT_monthly,
-                                    mc.cores = 8)
-saveRDS(del_ASACT_monthly_ndusl, "../data/master/paper3_forecast/del_ASACT_monthly.rds")
-
-f_del_MAPA <- partial(get_client_ndusl_forecast,
-                      ffun = partial(MAPA,
-                                     agg = 7),
-                      dfun = del_real_forecast_train_data)
-del_MAPA_ndusl <- mclapply(data_3, f_del_MAPA, mc.cores = 8)
-saveRDS(del_MAPA_ndusl, "../data/master/paper3_forecast/del_MAPA.rds")
-
-
-## Loading models
-### Consumption
-con_ets_ndusl <- readRDS("../data/master/paper3_forecast/con_ets.rds")
-con_ses_ndusl <- readRDS("../data/master/paper3_forecast/con_ses.rds")
-con_croston_base_ndusl <- readRDS("../data/master/paper3_forecast/con_crostonbase.rds")
-con_croston_opt_ndusl <- readRDS("../data/master/paper3_forecast/con_crostonopt.rds")
-con_ADIDA_weekly_ndusl <- readRDS("../data/master/paper3_forecast/con_ADIDA_weekly.rds")
-con_ADIDA_monthly_ndusl <- readRDS("../data/master/paper3_forecast/con_ADIDA_monthly.rds")
-con_ASACT_weekly_ndusl <- readRDS("../data/master/paper3_forecast/con_ASACT_weekly.rds")
-con_ASACT_monthly_ndusl <- readRDS("../data/master/paper3_forecast/con_ASACT_monthly.rds")
-con_MAPA_ndusl <- readRDS("../data/master/paper3_forecast/con_MAPA.rds")
-
-### Delivery
-del_ets_ndusl <- readRDS("../data/master/paper3_forecast/del_ets.rds")
-del_ses_ndusl <- readRDS("../data/master/paper3_forecast/del_ses.rds")
-del_croston_base_ndusl <- readRDS("../data/master/paper3_forecast/del_crostonbase.rds")
-del_croston_opt_ndusl <- readRDS("../data/master/paper3_forecast/del_crostonopt.rds")
-del_ADIDA_weekly_ndusl <- readRDS("../data/master/paper3_forecast/del_ADIDA_weekly.rds")
-del_ADIDA_monthly_ndusl <- readRDS("../data/master/paper3_forecast/del_ADIDA_monthly.rds")
-del_ASACT_weekly_ndusl <- readRDS("../data/master/paper3_forecast/del_ASACT_weekly.rds")
-del_ASACT_monthly_ndusl <- readRDS("../data/master/paper3_forecast/del_ASACT_monthly.rds")
-del_MAPA_ndusl <- readRDS("../data/master/paper3_forecast/del_MAPA.rds")
-
-
-## Robustness
-## What to do with the NA values in the forecasting method
-## Removing them changes the bias
-## If we produce a mean DNDUSL and remove the NA value is that biased
-## Or methods with a lot of NA's will also have a lot of bad ones
-ndusl_robustness <- function(ndusl_data) {
-    return(sum(sapply(ndusl_data, function(x) sum(is.na(x["ndusl",])))))
-}
-
-ndusl_robustness(con_ets_ndusl)
-ndusl_robustness(con_ses_ndusl)
-ndusl_robustness(con_croston_base_ndusl)
-ndusl_robustness(con_croston_opt_ndusl)
-ndusl_robustness(con_ADIDA_weekly_ndusl)
-ndusl_robustness(con_ADIDA_monthly_ndusl)
-ndusl_robustness(con_ASACT_weekly_ndusl)
-ndusl_robustness(con_ASACT_monthly_ndusl)
-ndusl_robustness(con_MAPA_ndusl)
-
-ndusl_robustness(del_ets_ndusl)
-ndusl_robustness(del_ses_ndusl)
-ndusl_robustness(del_croston_base_ndusl)
-ndusl_robustness(del_croston_opt_ndusl)
-ndusl_robustness(del_ADIDA_weekly_ndusl)
-ndusl_robustness(del_ADIDA_monthly_ndusl)
-ndusl_robustness(del_ASACT_weekly_ndusl)
-ndusl_robustness(del_ASACT_monthly_ndusl)
-ndusl_robustness(del_MAPA_ndusl)
-
-
-dfun <- con_real_forecast_train_data
-ndusl_mat <- con_ets_ndusl[[1]]
-
-na_series <- function(ndusl_mat, client, dfun) {
-    del_list <- client$test$del_list
-    ncols <- ncol(ndusl_mat)
-
-    train_list <- list()
-
-    for(i in seq_len(ncols)) {
-        ndusl <- ndusl_mat[["ndusl", i]]
-        if (is.na(ndusl)) {
-            train <- dfun(client, del_list[[i]])
-            train_list <- c(train_list, list(train))
+    if (is.na(type)) {
+        ## We haven't set the type of delivery, but we know the delivery is on time
+        ## but it could be that the delivery has to be done quicker than the
+        ## safety_lead_time. In this case we consider the delievery to be an
+        ## emergency
+        if ((del_date - start_date) < safety_lead_time) {
+            type <- 1L
+        } else {
+            type <- 0L
         }
     }
-    return(train_list)
-}
 
-foo <- mapply(na_series, con_ets_ndusl, data_3, MoreArgs = list(dfun = con_real_forecast_train_data))
-bar <- unlist(foo, recursive = FALSE)
-intermittent_categorisation(bar, type = "PKa", outplot = "none")
-
-
-na_models <- function(ndusl_mat) {
-    ncols <- ncol(ndusl_mat)
-
-    model_list <- list()
-
-    for(i in seq_len(ncols)) {
-        ndusl <- ndusl_mat[["ndusl", i]]
-        if (is.na(ndusl)) {
-            model <- ndusl_mat[["model", i ]]
-            modelcomponents <- paste(model$components[1], model$components[2],
-                                     model$components[3], sep = "")
-            model_list <- c(model_list, list(modelcomponents))
-        }
-    }
-    return(model_list)
-}
-
-foo <- lapply(con_ets_ndusl, na_models)
-bar <- unlist(foo)
-table(bar)
-
-ets_models <- function(ndusl_mat) {
-    ncols <- ncol(ndusl_mat)
-
-    model_list <- list()
-
-    for(i in seq_len(ncols)) {
-        ndusl <- ndusl_mat[["ndusl", i]]
-
-        model <- ndusl_mat[["model", i ]]
-        modelcomponents <- paste(model$components[1], model$components[2],
-                                     model$components[3], sep = "")
-        model_list <- c(model_list, list(modelcomponents))
-
-    }
-    return(model_list)
-}
-
-foo <- lapply(con_ets_ndusl, ets_models)
-bar <- unlist(foo)
-table(bar)
-
-## TODO Can we do a p-value test on this result
-
-## Do the mean value of the true NTUSS for the non converging forecasts using the new_true_list
-sum(sapply(con_ets_ndusl, function(x) ncol(x))) - sum(sapply(new_true_list, sum))
-
-
-foo <- mapply(real_ndusl, new_true_list, FUN = function(x, y) x[!y])
-mean(unlist(foo))
-
-
-## Remove the nas when calulcating the ndusl metric from all the forecasts
-ndusl_models_list <- list(con_ets_ndusl,
-                          con_ses_ndusl,
-                          con_croston_base_ndusl,
-                          con_croston_opt_ndusl,
-                          con_ADIDA_weekly_ndusl,
-                          con_ADIDA_monthly_ndusl,
-                          con_ASACT_weekly_ndusl,
-                          con_ASACT_monthly_ndusl,
-                          con_MAPA_ndusl,
-                          del_ets_ndusl,
-                          del_ses_ndusl,
-                          del_croston_base_ndusl,
-                          del_croston_opt_ndusl,
-                          del_ADIDA_weekly_ndusl,
-                          del_ADIDA_monthly_ndusl,
-                          del_ASACT_weekly_ndusl,
-                          del_ASACT_monthly_ndusl,
-                          del_MAPA_ndusl)
-
-true_list <- lapply(con_ets_ndusl, function(x) !vector(length = ncol(x)))
-
-compare_model_true_list <- function(true_list, model) {
-    model_true_list <- lapply(model, function(x) !is.na(x["ndusl",]))
-    combined_list <- mapply(true_list, model_true_list, FUN = `&`, SIMPLIFY = FALSE)
-    return(combined_list)
-}
-
-new_true_list <- Reduce(compare_model_true_list, x = ndusl_models_list, init = true_list)
-saveRDS(new_true_list, "../data/master/paper3_forecast/master_true_list.rds")
-new_true_list <- readRDS("../data/master/paper3_forecast/master_true_list.rds")
-
-## Error
-real_ndusl <- lapply(data_3, function(x) x$ndusl$real)
-
-asymmetric_scoring <- function(x) {
-    if(x < 0) {
-        return(abs(0.5*x))
+    if (overfilling) {
+        next_start_tel <- max_level
     } else {
-        return(x)
+        ## Can't store more in the tank than the max capacity
+        next_start_tel <- min(max_level, next_start_tel)
     }
+
+    return(
+        list(
+            date = del_date,
+            amount_pred = del_amount_pred,
+            amount_real = del_amount_real,
+            next_start_tel = next_start_tel,
+            type = type
+        )
+    )
 }
 
 
-ndusl_score <- function(ndusl_mat, real_ndusl, score_type, true_list) {
-    score_type <- match.arg(score_type, c("dndusl", "abs", "squared", "asymmetric"))
-    f_ndusl <- unlist(ndusl_mat["ndusl",])[true_list]
-    real_ndusl <- real_ndusl[true_list]
-    dndusl <- f_ndusl - real_ndusl
-
-    if(length(dndusl) == 0) {
-        return(NULL)
-    }
-
-    res <- switch(score_type, dndusl = {
-        dndusl
-    }, abs = {
-        abs(dndusl)
-    }, squared = {
-        dndusl**2
-    }, asymmetric = {
-        sapply(dndusl, asymmetric_scoring)
-    })
-
-    return(res)
-}
+consummed_stock <- function(client, start, end) {
+    #' Return the consummed stock for a client between start and end inclusively
+    return(sum(client$con$orig[xts_range(start, end)]))
+ }
 
 
-## Example NTUSS, DNTUSS, NTUSS score for a customer
-table(unlist(con_ets_ndusl[[1]]["ndusl",]) - real_ndusl[[1]])
-ndusl_score(con_ets_ndusl[[2]], real_ndusl[[2]], "dndusl", new_true_list[[2]])
+lead_time_ndusl_forecast <- function(safety_lead_time, client, dfun, ffun, safety_level, start_date, start_tel) {
+    #' NDUSL forecast while improving the forecast with recomputing results
+    #' until the lead time is reached. We increment the start_date for our forecast
 
+    del_time <- safety_lead_time + 1  # Dummy init to ensure loop begins
+    guess <- 365  # Large guess because it doesn't the calculation speed
 
-## Scores over all our forecasts
-ndusl_fcast_error <- function(ndusl_mat, client, dfun) {
-    #' Calculate the standard out-of-sample errors for the ndusl forecast
-    del_list <- client$test$del_list
-    ncols <- ncol(ndusl_mat)
-    error <- matrix(nrow = 6, ncol = ncols)
-    rownames(error) <- c("sME", "sMAE", "sMSE", "MASE", "sPIS", "sAPIS")
+    train_data <- dfun(client, start_date)
+    init_model <- ffun(train_data)
+    init_start_date <- start_date
 
-    for(i in seq_len(ncols)) {
-        train <- dfun(client, del_list[[i]])
-        scale <- mean(train)
-        model <- ndusl_mat[["model", i]]
-        ndusl <- ndusl_mat[["ndusl", i]]
-        if (is.na(ndusl)) {
-            error[,i] <- rep(NA, times = 6)
-            next
+    while (del_time > safety_lead_time) {
+        train_data <- dfun(client, start_date)
+        ## Speed up the loop by updating the forcasting model instead of recomputing it
+        tryCatch({
+            fmodel <- update(init_model, train_data)
+        },
+        error = {
+            ## Possible that the new data causes the model to have an error
+            ## As such we recalculate the whole model. This new
+            ## model then becomes our init_model for the rest of
+            ## the forecasts.
+            init_model <<- ffun(train_data)
+            fmodel <- init_model
+        })
+
+        sim_res <- try_ndusl_forecast(fmodel, guess, start_tel, safety_level)
+        del_time <- sim_res$ndusl[[1]]
+
+        if (is.na(del_time)) {
+            ## We are simulating past the 2016 date range for our next delivery
+            ## so we end the function here
+            return(NA)
         }
 
-        fcast <- result_forecast(forecast(model, x = train, h = ndusl))
-        real <- as.numeric(tail(dfun(client, del_list[[i]], ndusl), n = ndusl))
+        start_date <- start_date + 1
 
-        error[,i] <- c(my_sME(real, fcast, scale),
-                       my_sMAE(real, fcast, scale),
-                       my_sMSE(real, fcast, scale),
-                       my_MASE(real, fcast),
-                       my_sPIS(real, fcast, scale),
-                       my_sAPIS(real, fcast, scale))
+        ## Remove the days consummed stock, that's now our new start_tel for the loop
+        start_tel <- start_tel - as.numeric(client$con$filt[start_date])
+    }
+    ## Fix the final amounts and dates
+    ## We need to remve 1 to the date since start_date was increased by one before
+    ## breaking the loop
+    sim_res$date <- sim_res$ndusl[[1]] + start_date - 1
+
+    if (sim_res$date > as.Date("2016-12-31")) {
+        ## Our forecasted simulate is out-of-bonds of our simulation
+        return(NA)
     }
 
-    return(error)
-}
-
-### Consumption
-con_ets_ndusl_errors <- mcmapply(ndusl_fcast_error, con_ets_ndusl, data_3, MoreArgs = list(dfun = con_real_forecast_train_data), mc.cores = 8)
-saveRDS(con_ets_ndusl_errors, "../data/master/paper3_forecast/con_ets_error.rds")
-
-con_ses_ndusl_errors <- mcmapply(ndusl_fcast_error, con_ses_ndusl, data_3, MoreArgs = list(dfun = con_real_forecast_train_data), mc.cores = 8)
-saveRDS(con_ses_ndusl_errors, "../data/master/paper3_forecast/con_ses_error.rds")
-
-con_croston_base_ndusl_errors <- mcmapply(ndusl_fcast_error, con_croston_base_ndusl, data_3, MoreArgs = list(dfun = con_real_forecast_train_data), mc.cores = 8)
-saveRDS(con_croston_base_ndusl_errors, "../data/master/paper3_forecast/con_croston_base_error.rds")
-
-con_croston_opt_ndusl_errors <- mcmapply(ndusl_fcast_error, con_croston_opt_ndusl, data_3, MoreArgs = list(dfun = con_real_forecast_train_data), mc.cores = 8)
-saveRDS(con_croston_opt_ndusl_errors, "../data/master/paper3_forecast/con_croston_opt_error.rds")
-
-con_ADIDA_weekly_ndusl_errors <- mcmapply(ndusl_fcast_error, con_ADIDA_weekly_ndusl, data_3, MoreArgs = list(dfun = con_real_forecast_train_data), mc.cores = 8)
-saveRDS(con_ADIDA_weekly_ndusl_errors, "../data/master/paper3_forecast/con_ADIDA_weekly_error.rds")
-
-con_ADIDA_monthly_ndusl_errors <- mcmapply(ndusl_fcast_error, con_ADIDA_monthly_ndusl, data_3, MoreArgs = list(dfun = con_real_forecast_train_data), mc.cores = 8)
-saveRDS(con_ADIDA_monthly_ndusl_errors, "../data/master/paper3_forecast/con_ADIDA_monthly_error.rds")
-
-con_ASACT_weekly_ndusl_errors <- mcmapply(ndusl_fcast_error, con_ASACT_weekly_ndusl, data_3, MoreArgs = list(dfun = con_real_forecast_train_data), mc.cores = 8)
-saveRDS(con_ASACT_weekly_ndusl_errors, "../data/master/paper3_forecast/con_ASACT_weekly_error.rds")
-
-con_ASACT_monthly_ndusl_errors <- mcmapply(ndusl_fcast_error, con_ASACT_monthly_ndusl, data_3, MoreArgs = list(dfun = con_real_forecast_train_data), mc.cores = 8)
-saveRDS(con_ASACT_monthly_ndusl_errors, "../data/master/paper3_forecast/con_ASACT_monthly_error.rds")
-
-con_MAPA_ndusl_errors <- mapply(ndusl_fcast_error, con_MAPA_ndusl, data_3, MoreArgs = list(dfun = con_real_forecast_train_data))
-saveRDS(con_MAPA_ndusl_errors, "../data/master/paper3_forecast/con_MAPA_error.rds")
-
-
-### Deliveries
-del_ets_ndusl_errors <- mcmapply(ndusl_fcast_error, del_ets_ndusl, data_3, MoreArgs = list(dfun = del_real_forecast_train_data), mc.cores = 8)
-saveRDS(del_ets_ndusl_errors, "../data/master/paper3_forecast/del_ets_error.rds")
-
-del_ses_ndusl_errors <- mcmapply(ndusl_fcast_error, del_ses_ndusl, data_3, MoreArgs = list(dfun = del_real_forecast_train_data), mc.cores = 8)
-saveRDS(del_ses_ndusl_errors, "../data/master/paper3_forecast/del_ses_error.rds")
-
-del_croston_base_ndusl_errors <- mcmapply(ndusl_fcast_error, del_croston_base_ndusl, data_3, MoreArgs = list(dfun = del_real_forecast_train_data), mc.cores = 8)
-saveRDS(del_croston_base_ndusl_errors, "../data/master/paper3_forecast/del_croston_base_error.rds")
-
-del_croston_opt_ndusl_errors <- mcmapply(ndusl_fcast_error, del_croston_opt_ndusl, data_3, MoreArgs = list(dfun = del_real_forecast_train_data), mc.cores = 8)
-saveRDS(del_croston_opt_ndusl_errors, "../data/master/paper3_forecast/del_croston_opt_error.rds")
-
-del_ADIDA_weekly_ndusl_errors <- mcmapply(ndusl_fcast_error, del_ADIDA_weekly_ndusl, data_3, MoreArgs = list(dfun = del_real_forecast_train_data), mc.cores = 8)
-saveRDS(del_ADIDA_weekly_ndusl_errors, "../data/master/paper3_forecast/del_ADIDA_weekly_error.rds")
-
-del_ADIDA_monthly_ndusl_errors <- mcmapply(ndusl_fcast_error, del_ADIDA_monthly_ndusl, data_3, MoreArgs = list(dfun = del_real_forecast_train_data), mc.cores = 8)
-saveRDS(del_ADIDA_monthly_ndusl_errors, "../data/master/paper3_forecast/del_ADIDA_monthly_error.rds")
-
-del_ASACT_weekly_ndusl_errors <- mcmapply(ndusl_fcast_error, del_ASACT_weekly_ndusl, data_3, MoreArgs = list(dfun = del_real_forecast_train_data), mc.cores = 8)
-saveRDS(del_ASACT_weekly_ndusl_errors, "../data/master/paper3_forecast/del_ASACT_weekly_error.rds")
-
-del_ASACT_monthly_ndusl_errors <- mcmapply(ndusl_fcast_error, del_ASACT_monthly_ndusl, data_3, MoreArgs = list(dfun = del_real_forecast_train_data), mc.cores = 8)
-saveRDS(del_ASACT_monthly_ndusl_errors, "../data/master/paper3_forecast/del_ASACT_monthly_error.rds")
-
-del_MAPA_ndusl_errors <- mapply(ndusl_fcast_error, del_MAPA_ndusl, data_3, MoreArgs = list(dfun = del_real_forecast_train_data))
-saveRDS(del_MAPA_ndusl_errors, "../data/master/paper3_forecast/del_MAPA_error.rds")
-
-
-con_ets_ndusl_errors <- readRDS("../data/master/paper3_forecast/con_ets_error.rds")
-con_ses_ndusl_errors <- readRDS("../data/master/paper3_forecast/con_ses_error.rds")
-con_croston_base_ndusl_errors <- readRDS("../data/master/paper3_forecast/con_croston_base_error.rds")
-con_croston_opt_ndusl_errors <- readRDS("../data/master/paper3_forecast/con_croston_opt_error.rds")
-con_ADIDA_weekly_ndusl_errors <- readRDS("../data/master/paper3_forecast/con_ADIDA_weekly_error.rds")
-con_ADIDA_monthly_ndusl_errors <- readRDS("../data/master/paper3_forecast/con_ADIDA_monthly_error.rds")
-con_ASACT_weekly_ndusl_errors <- readRDS("../data/master/paper3_forecast/con_ASACT_weekly_error.rds")
-con_ASACT_monthly_ndusl_errors <- readRDS("../data/master/paper3_forecast/con_ASACT_monthly_error.rds")
-con_MAPA_ndusl_errors <- readRDS("../data/master/paper3_forecast/con_MAPA_error.rds")
-
-del_ets_ndusl_errors <- readRDS("../data/master/paper3_forecast/del_ets_error.rds")
-del_ses_ndusl_errors <- readRDS("../data/master/paper3_forecast/del_ses_error.rds")
-del_croston_base_ndusl_errors <- readRDS("../data/master/paper3_forecast/del_croston_base_error.rds")
-del_croston_opt_ndusl_errors <- readRDS("../data/master/paper3_forecast/del_croston_opt_error.rds")
-del_ADIDA_weekly_ndusl_errors <- readRDS("../data/master/paper3_forecast/del_ADIDA_weekly_error.rds")
-del_ADIDA_monthly_ndusl_errors <- readRDS("../data/master/paper3_forecast/del_ADIDA_monthly_error.rds")
-del_ASACT_weekly_ndusl_errors <- readRDS("../data/master/paper3_forecast/del_ASACT_weekly_error.rds")
-del_ASACT_monthly_ndusl_errors <- readRDS("../data/master/paper3_forecast/del_ASACT_monthly_error.rds")
-del_MAPA_ndusl_errors <- readRDS("../data/master/paper3_forecast/del_MAPA_error.rds")
-
-
-ndusl_models_errors_list <- list(con_ets_ndusl_errors,
-                                 con_ses_ndusl_errors,
-                                 con_croston_base_ndusl_errors,
-                                 con_croston_opt_ndusl_errors,
-                                 con_ADIDA_weekly_ndusl_errors,
-                                 con_ADIDA_monthly_ndusl_errors,
-                                 con_ASACT_weekly_ndusl_errors,
-                                 con_ASACT_monthly_ndusl_errors,
-                                 con_MAPA_ndusl_errors,
-                                 del_ets_ndusl_errors,
-                                 del_ses_ndusl_errors,
-                                 del_croston_base_ndusl_errors,
-                                 del_croston_opt_ndusl_errors,
-                                 del_ADIDA_weekly_ndusl_errors,
-                                 del_ADIDA_monthly_ndusl_errors,
-                                 del_ASACT_weekly_ndusl_errors,
-                                 del_ASACT_monthly_ndusl_errors,
-                                 del_MAPA_ndusl_errors)
-
-
-## Error Table showing the average score and fcast errors for a model
-ndusl_fcast_error_measurments <- function(ndusl_model, ndusl_model_errors, real_ndusl, true_list) {
-    pars <- mget(names(formals()))
-
-    f1 <- function(error) mean(unlist(mapply(FUN = ndusl_score, ndusl_model, real_ndusl, true_list, MoreArgs = list(score_type = error))))
-
-    dndusl <- f1("dndusl")
-    ndusl_abs_score <- f1("abs")
-    ndusl_squared_score <- f1("square")
-    ndusl_asymmetric_score <- f1("asymmetric")
-
-    f2 <- function(error) mean(unlist(lapply(ndusl_model_errors, function(x) x[error,]))[unlist(true_list)])
-
-    sme <- f2("sME")
-    smae <- f2("sMAE")
-    smse <- f2("sMSE")
-    spis <- f2("sPIS")
-    sapis <- f2("sAPIS")
-
-    data.frame(dndusl = dndusl,
-               ndusl.abs.score = ndusl_abs_score,
-               ndusl.squared.score = ndusl_squared_score,
-               ndusl.asymmetric.score = ndusl_asymmetric_score,
-               sme = sme,
-               smae = smae,
-               smse = smse,
-               spis = spis,
-               sapis = sapis)
+    if (del_time == 0) {
+        ## We forecast the NDUSL. It returns 1. I.E. tomorrow we will be under
+        ## the safety level. Now when we want to get the day before the safety
+        ## level. That day ends up being today. The day from which we did the
+        ## forecast. The del_time is 0. Since we can't deliver today,
+        ## we deliver tomorrow (the earliest time possible to not be under
+        ## safety stock as much possible). The  amount delivered is our measured
+        ## stock used between the init_start to the forecast date + the predicted consummed stock
+        ## of the delivery date which is tomorrow.
+        sim_res$date <- sim_res$date + 1  # 0 (today) +1 gets us tomorrow
+        sim_res$real_stock_con <- consummed_stock(client, init_start_date, sim_res$date)
+        sim_res$pred_stock_con <- consummed_stock(client, init_start_date, sim_res$date - 1) + result_forecast(forecast(fmodel, 1))
+    } else if (del_time == -1) {
+        ## We forecast the NDUSL. It returns 0. I.E. we are already under
+        ## the safety level. Now when we want to get the day before the safety
+        ## level. That day ends up being yesterday. The day from which we did the
+        ## forecast. The del_time is -1. Since we can't deliver today,
+        ## we deliver tomorrow (the earliest time possible to not be under
+        ## safety stock as much possible). The  amount delivered is our measured
+        ## stock used between the init_start to the forecast date + the predicted consummed stock
+        ## of the delivery date which is tomorrow.
+        sim_res$date <- sim_res$date + 2 # -1 (yesterday) + 2 gets us tomorrow
+        sim_res$real_stock_con <- consummed_stock(client, init_start_date, sim_res$date)
+        sim_res$pred_stock_con <- consummed_stock(client, init_start_date, sim_res$date - 1) + result_forecast(forecast(fmodel, 1))
+    } else if (del_time > 0) {
+        ## The stock consumption predicted and real
+        ## For the real amount it's the consummed stock from the start of the loop
+        ## we add one because this function is inclusive, whereas the loop is exclusive
+        ## The loop begins the day we delivered
+        ## the consummed stock starts the day after
+        ## The predicted amount is the consummed stock up to the day we do our last forecast
+        ## plus the forecasted amount
+        sim_res$real_stock_con <- consummed_stock(client, init_start_date + 1, sim_res$date)
+        sim_res$pred_stock_con <- consummed_stock(client, init_start_date + 1, sim_res$date - del_time) + sim_res$ndusl[2]
+    } else {
+        stop("NDUSL less than -1. This shouldn't be possible.")
+    }
+    sim_res$ndusl <- NULL
+    return(sim_res)
 }
 
 
-summary(unlist(lapply(con_MAPA_ndusl_errors, function(x) x["sMSE",]))[unlist(new_true_list)])
+forecast_ndusl_simulation <- function(client, safety_stock, safety_lead_time, ffun, data_type, overfilling) {
+    #' Simulate the NDUSL for a customer where we are attemption to forecast the NDUSL
+    #' We will fill the tank the day before our forecasted NDUSL
+
+    #' Algorithm function
+    ##' After the delivery at t, we forecast a NDUSL.
+    ##' The forecasted NDUSL is recomputed.
+    ##' The day right before the NDUSL is our new delivery date.
+    ##' The amount delivered on that date is the consummed amount including the
+    ##' delivery day.
+    ##' The telemetry of the day after the delivery is the max amount allowed in stock.
+    ##' We then calculate the NDUSL following the new delivery at the new telemetry.
+    ##' Measure both the forecasted consumption and what we actually refill for.
+    ##' If overfilling then the deliveries are done to the max capacity each time
+    ##' if not then use the predicted amounts for the delivered amount
+    ##' either values are then used for the starting telemetry of the next delivery.
+
+    ## We start the telemetry on 2015-12-31, but deliveries only start on the 2016-01-01
+    ## We deliver the day right before we reach the out-of-stock.
+    ## We always deliver up to the max stock.
+    ## The amount we deliver includes the  amount that would have been consummed
+    ## the day of the delivery.
+
+    data_type <- match.arg(data_type, c("del", "con"))
+    dfun <- switch(data_type,
+                   con = con_real_forecast_train_data,
+                   del = del_real_forecast_train_data)
+
+    max_level <- client$ndusl$max_tel
+    safety_level <- safety_stock * max_level
+
+    ## First iteration
+    ## Assume that the last delivery was done on the last day of 2015, we now
+    ## simulate the following year
+    start_date <- as.Date("2015-12-31")
+    start_tel <- last_tel_reading_of_day(start_date, client$cvd)
+
+    if (start_tel < safety_level) {
+        ## We are already under the safety level, we perform an emergency
+        ## delivery to bring us back up above the safety level
+        ## We deliver enough to bring us back to max + the days predicted consummed
+        ## stock
+        del_date <- start_date + 1
+
+        ## Forecast tomorrows consummed stock
+        fmodel <- ffun(dfun(client, start_date))
+        res <- result_forecast(forecast(fmodel, 1))
+        del_amount_pred <- res
+        del_amount_real <- consummed_stock(client, del_date, del_date)
+
+        emer_del <- list(
+            date = del_date,
+            pred_stock = del_amount_pred,
+            real_stock = del_amount_real
+        )
+        final_res <- compare_sim_results(max_level, start_tel, overfilling, start_date, safety_lead_time, emer = emer_del)
+    } else {
+        ## We are above the safety level, let's do the simulation and compare it to
+        ## the truth
+        ## Real oos is fixed at 0 safety_level, we want to know when an out-of-stock
+        ## occurs, thus 0 safety level.
+        oos_real <- start_date + next_day_under_safety_level(client$con$filt, start_date, start_tel, safety_level = 0)
+
+        ## The delivery simulation is run with a very high safety_lead_time so that the loop
+        ## only runs once
+        oos_sim <- switch(data_type,
+                          con = lead_time_ndusl_forecast(safety_lead_time, client, dfun, ffun, safety_level, start_date, start_tel),
+                          del = lead_time_ndusl_forecast(1000000, client, dfun, ffun, safety_level, start_date, start_tel))
+
+        final_res <- compare_sim_results(max_level, start_tel, overfilling, start_date, safety_lead_time, real = oos_real, sim = oos_sim)
+    }
+
+    ## init result list
+    dels_date <- c(final_res$date)
+    dels_amount_pred <- c(final_res$amount_pred)
+    dels_amount_real <- c(final_res$amount_real)
+    types <- c(final_res$type)
+
+    #' The main forward loop
+    i <- 2
+
+    while (TRUE) {
+        start_date <- dels_date[[i-1]]
+        start_tel <- final_res$next_start_tel
+
+        if (start_tel < safety_level) {
+            ## We are already under the safety level, we perform an emergency
+            ## delivery to bring us back up above the safety level
+            ## We deliver enough to bring us back to max + the days predicted consummed
+            ## stock
+            del_date <- start_date + 1
+
+            ## Forecast tomorrows consummed stock
+            fmodel <- ffun(dfun(client, start_date))
+            res <- result_forecast(forecast(fmodel, 1))
+            del_amount_pred <- res
+            del_amount_real <- consummed_stock(client, del_date, del_date)
+
+            emer_del <- list(
+                date = del_date,
+                pred_stock = del_amount_pred,
+                real_stock = del_amount_real
+            )
+            final_res <- compare_sim_results(max_level, start_tel, overfilling, start_date, safety_lead_time, emer = emer_del)
+        } else {
+            ## We are above the safety level, let's do the simulation and compare it to
+            ## the truth
+            ## Real oos is fixed at 0 safety_level, we want to know when an out-of-stock
+            ## occurs, thus 0 safety level.
+            oos_real <- start_date + next_day_under_safety_level(client$con$filt, start_date, start_tel, safety_level = 0)
+
+            ## The delivery simulation is run with a very high safety_lead_time so that the loop
+            ## only runs once
+            oos_sim <- switch(data_type,
+                              con = lead_time_ndusl_forecast(safety_lead_time, client, dfun, ffun, safety_level, start_date, start_tel),
+                              del = lead_time_ndusl_forecast(1000000, client, dfun, ffun, safety_level, start_date, start_tel))
+
+            if(is.na(oos_sim) & is.na(oos_real)) {
+                ## Both the real results and the simulation are out-of-bounds
+                break
+            }
+
+            final_res <- compare_sim_results(max_level, start_tel, overfilling, start_date, safety_lead_time, real = oos_real, sim = oos_sim)
+        }
+
+        dels_date[[i]] <- final_res$date
+        dels_amount_pred[[i]] <- final_res$amount_pred
+        dels_amount_real[[i]] <- final_res$amount_real
+        types[[i]] <- final_res$type
+        i <- i+1
+    }
+
+    ## Determine the real delivery amounts
+    del_real <- client$del$orig
+    true_dates <- client$test$del_list
+    true_amounts <- as.numeric(del_real[index(del_real) %in% true_dates])
 
 
-foo <- t(mapply(FUN = ndusl_fcast_error_measurments, ndusl_models_list, ndusl_models_errors_list, MoreArgs = list(real_ndusl = real_ndusl, true_list = new_true_list)))
-
-## Be very careful if you change the order of the forecast models in other objects
-## There's no way to make this automatic if you are using an mapply to match the call
-rownames(foo) <- c("con ETS", "con SES", "con SBA", "con SBA opt",
-                   "con ADIDA weekly", "con ADIDA monthly", "con ASACT weekly",
-                   "con ASACT monthly", "con MAPA",
-                   "del ETS", "del SES", "del SBA", "del SBA opt",
-                   "del ADIDA weekly", "del ADIDA monthly", "del ASACT weekly",
-                   "del ASACT monthly", "del MAPA")
-
-foo
-
-## Ranked correlation between the error measurment and NDUSL
-bar <- as.data.frame(foo)
-
-cor.test(as.numeric(bar$sme), as.numeric(bar$dndusl), method = "spearman")
-cor.test(as.numeric(bar$smae), as.numeric(bar$dndusl), method = "spearman")
-cor.test(as.numeric(bar$smse), as.numeric(bar$dndusl), method = "spearman")
-cor.test(as.numeric(bar$spis), as.numeric(bar$dndusl), method = "spearman")
-cor.test(as.numeric(bar$sapis), as.numeric(bar$dndusl), method = "spearman")
-
-cor.test(as.numeric(bar$sme), as.numeric(bar$ndusl.abs.score), method = "spearman")
-cor.test(as.numeric(bar$smae), as.numeric(bar$ndusl.abs.score), method = "spearman")
-cor.test(as.numeric(bar$smse), as.numeric(bar$ndusl.abs.score), method = "spearman")
-cor.test(as.numeric(bar$spis), as.numeric(bar$ndusl.abs.score), method = "spearman")
-cor.test(as.numeric(bar$sapis), as.numeric(bar$ndusl.abs.score), method = "spearman")
-
-cor.test(as.numeric(bar$sme), as.numeric(bar$ndusl.squared.score), method = "spearman")
-cor.test(as.numeric(bar$smae), as.numeric(bar$ndusl.squared.score), method = "spearman")
-cor.test(as.numeric(bar$smse), as.numeric(bar$ndusl.squared.score), method = "spearman")
-cor.test(as.numeric(bar$spis), as.numeric(bar$ndusl.squared.score), method = "spearman")
-cor.test(as.numeric(bar$sapis), as.numeric(bar$ndusl.squared.score), method = "spearman")
-
-cor.test(as.numeric(bar$sme), as.numeric(bar$ndusl.asymmetric.score), method = "spearman")
-cor.test(as.numeric(bar$smae), as.numeric(bar$ndusl.asymmetric.score), method = "spearman")
-cor.test(as.numeric(bar$smse), as.numeric(bar$ndusl.asymmetric.score), method = "spearman")
-cor.test(as.numeric(bar$spis), as.numeric(bar$ndusl.asymmetric.score), method = "spearman")
-cor.test(as.numeric(bar$sapis), as.numeric(bar$ndusl.asymmetric.score), method = "spearman")
-
-
-
-if (FALSE) {
-    data_3 <- readRDS("../data/master/data_paper3.rds")
-    client <- add_test_del_list(client)
-    data_3 <- update_state(data_3, add_test_del_list, "apply")
-    client$test$del_list == data_3[[1]]$test$del_list
-    client <- data_3[[1]]
-
-    client <- add_start_tel(client)
-    data_3 <- update_state(data_3, add_start_tel, "parallel")
-    client$ndusl$start_tel == data_3[[1]]$ndusl$start_tel
-    client <- data_3[[1]]
-
-    client <- add_safety_level(client)
-    data_3 <- update_state(data_3, add_safety_level, "apply")
-    client$ndusl$safety_level == data_3[[1]]$ndusl$safety_level
-    client <- data_3[[1]]
-
-    client <- add_ndusl_real(client)
-    data_3 <- update_state(data_3, add_ndusl_real, "parallel")
-    client$ndusl$real == data_3[[1]]$ndusl$real
-
-    client <- data_3[[1]]
-    del <- client$test$del_list[[1]]
-    start_tel <- client$ndusl$start_tel[[1]]
-    guess <- client$ndusl$guess_list[[1]]
-    safety_level <- client$ndusl$safety_level
-
-    real_ndusl <- client$ndusl$real[[1]]
-    real_ndusl
-    start_tel - safety_level
-
-
-    data <- con_real_forecast_train_data(client, del)
-    data <- del_real_forecast_train_data(client, del)
-
-    sum(tail(con_real_forecast_train_data(client, del, 12), 12))
-
-    sum(result_forecast(forecast(ses(con_real_forecast_train_data(client, del)), 12)))
-    sum(result_forecast(forecast(ets(con_real_forecast_train_data(client, del)), 15)))
-    sum(result_forecast(forecast(croston(del_real_forecast_train_data(client, del), "SBA.base"), 30)))
-    sum(result_forecast(forecast(ADIDA(con_real_forecast_train_data(client, del),
-                                       30+1,
-                                       partial(croston, f.type = "SBA.opt")), 12)))
-
-    sum(result_forecast(forecast(ets(del_real_forecast_train_data(client, del)), 34)))
-    sum(result_forecast(forecast(croston(del_real_forecast_train_data(client, del), "SBA.opt"), 30)))
-    sum(result_forecast(forecast(ADIDA(del_real_forecast_train_data(client, del),
-                                       30+1,
-                                       partial(croston, f.type = "SBA.opt")), 13)))
-
-    sum(result_forecast(forecast(ASACT(del_real_forecast_train_data(client, del),
-                                       7,
-                                       ets), 12)))
-
-    sum(result_forecast(forecast(MAPA(data, 7), 12)))
-
+    structure(
+        list(
+            dates = dels_date,
+            pred_amounts = dels_amount_pred,
+            real_amounts = dels_amount_real,
+            types = types,
+            true_dates = true_dates,
+            true_amounts = true_amounts,
+            safety_stock = safety_stock,
+            safety_lead_time = safety_lead_time,
+            data = data_type,
+            overfilling = overfilling
+        ),
+        class = "NDUSLsimulation"
+    )
 }
+
+
+service_level <- function(sim) {
+    #' Return the service level for a customer simulation
+    foo <- sim$types == 2
+    return(1 - sum(foo)/length(foo))
+}
+
+
+emergency_level <- function(sim) {
+    #' Return the proportion of emergency deliveries for a customer simulation
+    foo <- sim$types == 1
+    return(sum(foo)/length(foo))
+}
+
+
+service_level_optimisation <- function(client, sl, safety_lead_time, ffun, data_type, overfilling) {
+    ## Assuming a certain desired service_level can we optimise the safety stock
+    ## required to achieve that service level using our simulated ndusl forecasts
+
+    ## The opimisation procedure runs the simulation and evaluates the results
+    ## and then uses bissection to determine the optimal safety_stock
+
+    ## Some initial values to prepare before simulating
+    data_type <- match.arg(data_type, c("del", "con"))
+    a <- 0  # lower bound
+    b <- 0.5  # greedy upper bound
+    f1 <- partial(forecast_ndusl_simulation,
+                 client = client,
+                 safety_lead_time = safety_lead_time,
+                 ffun = ffun,
+                 data_type = data_type,
+                 overfilling = overfilling)
+    f2 <- service_level
+
+    ## Lower bound
+    sim_a <- f1(a)
+    res_a <- f2(sim_a)
+
+    if (res_a >= sl) {
+        ## The lower bound works We're done no point in continuing
+        return(list(opt_safety_level = a, sim = sim_a, service_level = res_a))
+    }
+
+    ## Upper bound
+    sim_b <- f1(b)
+    res_b <- f2(sim_b)
+
+    if (res_b < sl) {
+        ## We tried to be greedy with a small upper bound
+        ## Now we have a slower optimization
+        a <- 0.5  # reuse the previous b as the lower bound
+        sim_a <- sim_b
+        res_a <- res_b
+
+        b <- 1  # new upper bound
+        sim_b <- f1(b)
+        res_b <- f2(sim_b)
+
+        if (res_b < sl) {
+            stop("Can't satisfy service level with 100% safety stock.")
+        }
+    }
+
+    tol <- 0.02
+    while (b - a > tol) {
+        mid_point <- (a + b)/2
+        sim_mid <- f1(mid_point)
+        res_mid <- f2(sim_mid)
+
+        if (res_mid >= sl) {
+            b <- mid_point
+        } else {
+            a <- mid_point
+        }
+    }
+
+    ## When the bissection loop is over we have a couple of situations
+    if (res_mid >= sl) {
+        ## The smallest value is the one found by the bissection
+        return(list(opt_safety_level = mid_point, sim = sim_mid, service_level = res_mid))
+    } else {
+        ## Our last middle point in the bissection is under the sl
+        ## However, we know that the b upper bound was the last value >= sl
+        ## Unfortunateyl, we have to recompute the simulation
+        ## We could cache all simulation values but that would get a little involved
+        sim <- f1(b)
+        res <- f2(sim)
+        return(list(opt_safety_level = b, sim = sim, service_level = res))
+    }
+}
+
+
+###################################
+## Running the simulations
+###################################
+## Chosen model is SBA.opt
+client <- data_3[[1]]
+ffun <- partial(croston, f.type = "SBA.base")
+
+## 100% service level not studying lead time
+safety_lead_time <- 7
+sl <- 1
+overfilling <- FALSE
+
+foo <- service_level_optimisation(client, sl, safety_lead_time, ffun, "del", TRUE)
+bar <- service_level_optimisation(client, sl, safety_lead_time, ffun, "del", FALSE)
+
+
+## Applying the models over every customer
+## names are sim_*model*_*service level*_*safety lead time*_*data type*
+ffun <- partial(croston, f.type = "SBA.base")
+sim_crost_1_7_del <- mclapply(data_3, service_level_optimisation,
+                              sl = 1,
+                              safety_lead_time = 7,
+                              ffun = ffun,
+                              data_type = "del",
+                              overfilling = FALSE,
+                              mc.cores = 8)
+saveRDS(sim_crost_1_7_del, "../data/master/paper3_sim/crost_1_7_del")
+
+sim_crost_95_7_del <- mclapply(data_3, service_level_optimisation,
+                               sl = 0.95,
+                               safety_lead_time = 7,
+                               ffun = ffun,
+                               data_type = "del",
+                               overfilling = FALSE,
+                               mc.cores = 8)
+saveRDS(sim_crost_95_7_del, "../data/master/paper3_sim/crost_95_7_del")
+
+sim_crost_9_7_del <- mclapply(data_3, service_level_optimisation,
+                              sl = 0.9,
+                              safety_lead_time = 7,
+                              ffun = ffun,
+                              data_type = "del",
+                              overfilling = FALSE,
+                              mc.cores = 8)
+saveRDS(sim_crost_9_7_del, "../data/master/paper3_sim/crost_9_7_del")
+
+sim_crost_85_7_del <- mclapply(data_3, service_level_optimisation,
+                               sl = 0.85,
+                               safety_lead_time = 7,
+                               ffun = ffun,
+                               data_type = "del",
+                               overfilling = FALSE,
+                               mc.cores = 8)
+saveRDS(sim_crost_85_7_del, "../data/master/paper3_sim/crost_85_7_del")
+
+sim_crost_1_7_con <- mclapply(data_3, service_level_optimisation,
+                              sl = 1,
+                              safety_lead_time = 7,
+                              ffun = ffun,
+                              data_type = "con",
+                              overfilling = FALSE,
+                              mc.cores = 8)
+saveRDS(sim_crost_1_7_con, "../data/master/paper3_sim/crost_1_7_con")
+
+sim_crost_95_7_con <- mclapply(data_3, service_level_optimisation,
+                               sl = 0.95,
+                               safety_lead_time = 7,
+                               ffun = ffun,
+                               data_type = "con",
+                               overfilling = FALSE,
+                               mc.cores = 8)
+saveRDS(sim_crost_95_7_con, "../data/master/paper3_sim/crost_95_7_con")
+
+sim_crost_9_7_con <- mclapply(data_3, service_level_optimisation,
+                              sl = 0.9,
+                              safety_lead_time = 7,
+                              ffun = ffun,
+                              data_type = "con",
+                              overfilling = FALSE,
+                              mc.cores = 8)
+saveRDS(sim_crost_9_7_con, "../data/master/paper3_sim/crost_9_7_con")
+
+sim_crost_85_7_con <- mclapply(data_3, service_level_optimisation,
+                               sl = 0.85,
+                               safety_lead_time = 7,
+                               ffun = ffun,
+                               data_type = "con",
+                               overfilling = FALSE,
+                               mc.cores = 8)
+saveRDS(sim_crost_85_7_con, "../data/master/paper3_sim/crost_85_7_con")
+
+### Smaller lead time
+sim_crost_1_3_con <- mclapply(data_3, service_level_optimisation,
+                              sl = 1,
+                              safety_lead_time = 3,
+                              ffun = ffun,
+                              data_type = "con",
+                              overfilling = FALSE,
+                              mc.cores = 8)
+saveRDS(sim_crost_1_3_con, "../data/master/paper3_sim/crost_1_3_con")
+
+sim_crost_95_3_con <- mclapply(data_3, service_level_optimisation,
+                               sl = 0.95,
+                               safety_lead_time = 3,
+                               ffun = ffun,
+                               data_type = "con",
+                               overfilling = FALSE,
+                               mc.cores = 8)
+saveRDS(sim_crost_95_3_con, "../data/master/paper3_sim/crost_95_3_con")
+
+sim_crost_9_3_con <- mclapply(data_3, service_level_optimisation,
+                              sl = 0.9,
+                              safety_lead_time = 3,
+                              ffun = ffun,
+                              data_type = "con",
+                              overfilling = FALSE,
+                              mc.cores = 8)
+saveRDS(sim_crost_9_3_con, "../data/master/paper3_sim2/crost_9_3_con")
+
+sim_crost_85_3_con <- mclapply(data_3, service_level_optimisation,
+                               sl = 0.85,
+                               safety_lead_time = 3,
+                               ffun = ffun,
+                               data_type = "con",
+                               overfilling = FALSE,
+                               mc.cores = 8)
+saveRDS(sim_crost_85_3_con, "../data/master/paper3_sim/crost_85_3_con")
+
+### Overfilling
+## sim_crost_1_7_del_over <- mclapply(data_3, service_level_optimisation,
+##                                    sl = 1,
+##                                    safety_lead_time = 7,
+##                                    ffun = ffun,
+##                                    data_type = "del",
+##                                    overfilling = TRUE,
+##                                    mc.cores = 8)
+## saveRDS(sim_crost_1_7_del_over, "../data/master/paper3_sim/crost_1_7_del_over")
+
+## sim_crost_95_7_del_over <- mclapply(data_3, service_level_optimisation,
+##                                     sl = 0.95,
+##                                     safety_lead_time = 7,
+##                                     ffun = ffun,
+##                                     data_type = "del",
+##                                     overfilling = TRUE,
+##                                     mc.cores = 8)
+## saveRDS(sim_crost_95_7_del_over, "../data/master/paper3_sim/crost_95_7_del_over")
+
+## sim_crost_9_7_del_over <- mclapply(data_3, service_level_optimisation,
+##                                    sl = 0.9,
+##                                    safety_lead_time = 7,
+##                                    ffun = ffun,
+##                                    data_type = "del",
+##                                    overfilling = TRUE,
+##                                    mc.cores = 8)
+## saveRDS(sim_crost_9_7_del_over, "../data/master/paper3_sim/crost_9_7_del_over")
+
+## sim_crost_85_7_del_over <- mclapply(data_3, service_level_optimisation,
+##                                     sl = 0.85,
+##                                     safety_lead_time = 7,
+##                                     ffun = ffun,
+##                                     data_type = "del",
+##                                     overfilling = TRUE,
+##                                     mc.cores = 8)
+## saveRDS(sim_crost_85_7_del_over, "../data/master/paper3_sim/crost_85_7_del_over")
+
+## sim_crost_1_7_con_over <- mclapply(data_3, service_level_optimisation,
+##                                    sl = 1,
+##                                    safety_lead_time = 7,
+##                                    ffun = ffun,
+##                                    data_type = "con",
+##                                    overfilling = TRUE,
+##                                    mc.cores = 8)
+## saveRDS(sim_crost_1_7_con_over, "../data/master/paper3_sim/crost_1_7_con_over")
+
+## sim_crost_95_7_con_over <- mclapply(data_3, service_level_optimisation,
+##                                     sl = 0.95,
+##                                     safety_lead_time = 7,
+##                                     ffun = ffun,
+##                                     data_type = "con",
+##                                     overfilling = TRUE,
+##                                     mc.cores = 8)
+## saveRDS(sim_crost_95_7_con_over, "../data/master/paper3_sim/crost_95_7_con_over")
+
+## sim_crost_9_7_con_over <- mclapply(data_3, service_level_optimisation,
+##                                    sl = 0.9,
+##                                    safety_lead_time = 7,
+##                                    ffun = ffun,
+##                                    data_type = "con",
+##                                    overfilling = TRUE,
+##                                    mc.cores = 8)
+## saveRDS(sim_crost_9_7_con_over, "../data/master/paper3_sim/crost_9_7_con_over")
+
+## sim_crost_85_7_con_over <- mclapply(data_3, service_level_optimisation,
+##                                     sl = 0.85,
+##                                     safety_lead_time = 7,
+##                                     ffun = ffun,
+##                                     data_type = "con",
+##                                     overfilling = TRUE,
+##                                     mc.cores = 8)
+## saveRDS(sim_crost_85_7_con_over, "../data/master/paper3_sim/crost_85_7_con_over")
+
+## Loading data
+sim_crost_1_7_con <- readRDS("../data/master/paper3_sim/crost_1_7_con")
+sim_crost_95_7_con <- readRDS("../data/master/paper3_sim/crost_95_7_con")
+sim_crost_9_7_con <- readRDS("../data/master/paper3_sim/crost_9_7_con")
+sim_crost_85_7_con <- readRDS("../data/master/paper3_sim/crost_85_7_con")
+
+sim_crost_1_7_del <- readRDS("../data/master/paper3_sim/crost_1_7_del")
+sim_crost_95_7_del <- readRDS("../data/master/paper3_sim/crost_95_7_del")
+sim_crost_9_7_del <- readRDS("../data/master/paper3_sim/crost_9_7_del")
+sim_crost_85_7_del <- readRDS("../data/master/paper3_sim/crost_85_7_del")
+
+
+sim_crost_1_3_con <- readRDS("../data/master/paper3_sim/crost_1_3_con")
+sim_crost_95_3_con <- readRDS("../data/master/paper3_sim/crost_95_3_con")
+sim_crost_9_3_con <- readRDS("../data/master/paper3_sim/crost_9_3_con")
+sim_crost_85_3_con <- readRDS("../data/master/paper3_sim/crost_85_3_con")
+
+
+## simulated_ndusls_10 <- mclapply(new_data, ndusl_simulation, safety_level = 0.1, mc.cores = 8)
+## simulated_ndusls_12 <- mclapply(new_data, ndusl_simulation, safety_level = 0.12, mc.cores = 8)
+## simulated_ndusls_14 <- mclapply(new_data, ndusl_simulation, safety_level = 0.14, mc.cores = 8)
+## simulated_ndusls_16 <- mclapply(new_data, ndusl_simulation, safety_level = 0.16, mc.cores = 8)
+## simulated_ndusls_18 <- mclapply(new_data, ndusl_simulation, safety_level = 0.18, mc.cores = 8)
+## simulated_ndusls_20 <- mclapply(new_data, ndusl_simulation, safety_level = 0.2, mc.cores = 8)
+
+## total_real_dels <- sum(sapply(simulated_ndusls_10, function(x) length(x$real_dates)))
+
+## total_opt_dels <- sum(sapply(simulated_ndusls_10, function(x) length(x$dates)))
+
+#####################################
+## Evaluting the simulation results
+#####################################
+## Graph data
+f <- function(x) sapply(x, function(x) x$opt_safety_level)
+f2 <- function(x) sapply(x, function(x) length(x$sim$dates))
+
+graph_data <- rbind(data.frame(safety_stock = f(sim_crost_1_7_del),
+                               dels = f2(sim_crost_1_7_del),
+                               service_level = 1,
+                               type = "Delivery LT=7"),
+                    data.frame(safety_stock = f(sim_crost_95_7_del),
+                               dels = f2(sim_crost_95_7_del),
+                               service_level = 0.95,
+                               type = "Delivery LT=7"),
+                    data.frame(safety_stock = f(sim_crost_9_7_del),
+                               dels = f2(sim_crost_9_7_del),
+                               service_level = 0.9,
+                               type = "Delivery LT=7"),
+                    data.frame(safety_stock = f(sim_crost_85_7_del),
+                               dels = f2(sim_crost_85_7_del),
+                               service_level = 0.85,
+                               type = "Delivery LT=7"),
+                    data.frame(safety_stock = f(sim_crost_1_7_con),
+                               dels = f2(sim_crost_1_7_con),
+                               service_level = 1,
+                               type = "Telemetry LT=7"),
+                    data.frame(safety_stock = f(sim_crost_95_7_con),
+                               dels = f2(sim_crost_95_7_con),
+                               service_level = 0.95,
+                               type = "Telemetry LT=7"),
+                    data.frame(safety_stock = f(sim_crost_9_7_con),
+                               dels = f2(sim_crost_9_7_con),
+                               service_level = 0.9,
+                               type = "Telemetry LT=7"),
+                    data.frame(safety_stock = f(sim_crost_85_7_con),
+                               dels = f2(sim_crost_85_7_con),
+                               service_level = 0.85,
+                               type = "Telemetry LT=7"),
+                    data.frame(safety_stock = f(sim_crost_1_3_con),
+                               dels = f2(sim_crost_1_3_con),
+                               service_level = 1,
+                               type = "Telemetry LT=3"),
+                    data.frame(safety_stock = f(sim_crost_95_3_con),
+                               dels = f2(sim_crost_95_3_con),
+                               service_level = 0.95,
+                               type = "Telemetry LT=3"),
+                    data.frame(safety_stock = f(sim_crost_9_3_con),
+                               dels = f2(sim_crost_9_3_con),
+                               service_level = 0.9,
+                               type = "Telemetry LT=3"),
+                    data.frame(safety_stock = f(sim_crost_85_3_con),
+                               dels = f2(sim_crost_85_3_con),
+                               service_level = 0.85,
+                               type = "Telemetry LT=3"))
+
+graph_data$service_level <- as.factor(graph_data$service_level)
+
+graph_data$stock <- graph_data$safety_stock * sapply(data_3, function(x) x$ndusl$max_tel)
+
+ggplot(graph_data, aes(x=service_level, y=safety_stock, fill=type)) +
+    geom_boxplot(outlier.size = 0.5) +
+    xlab("Service Level") +
+    ylab("Safety Stock") +
+    theme_bw() +
+    theme(legend.title=element_blank(),
+          legend.position = "top",
+          text = element_text(size = 8)) +
+    scale_y_continuous(labels = scales::percent_format(accuracy = 1L)) +
+    scale_x_discrete(labels = c("85%", "90%", "95%", "100%"))
+
+ggsave("./papers/paper3/dist.png", device = "png", width = 90, height = 90, units = "mm", dpi = 1000)
+ggsave("./papers/paper3/dist.eps", device = cairo_ps, width = 90, height = 90, units = "mm", dpi = 1000)
+
+## Average safety stock for the types
+graph_data %>% group_by(service_level, type) %>% summarise(mean_safety_stock = mean(safety_stock))
+
+graph_data %>% group_by(type) %>% summarise(mean_safety_stock = mean(safety_stock))
+
+## Trade-off curves
+trade_data <- graph_data %>%
+    group_by(type, service_level) %>%
+    summarise(total_stock = sum(stock), total_del = sum(dels))
+
+trade_data$service_level <- as.numeric(as.character(trade_data$service_level))
+
+ggplot(data = trade_data, aes(x=total_stock, y = service_level, linetype = type, color = type)) +
+    geom_line() +
+    geom_point() +
+    xlab("Σ Inventory Stock (units)") +
+    ylab("Service Level") +
+    theme_bw() +
+    theme(legend.title=element_blank(),
+          legend.position = "top",
+          text = element_text(size = 8)) +
+    scale_y_continuous(labels = scales::percent_format(accuracy = 1L))
+
+ggsave("./papers/paper3/inventory.png", device = "png", width = 90, height = 90, units = "mm", dpi = 1000)
+ggsave("./papers/paper3/inventory.eps", device = cairo_ps, width = 90, height = 90, units = "mm", dpi = 1000)
+
+
+ggplot(data = trade_data, aes(x=total_del, y = service_level, linetype = type, color = type)) +
+    geom_line() +
+    geom_point() +
+    xlab("Σ Deliveries") +
+    ylab("Service Level") +
+    theme_bw() +
+    theme(legend.title=element_blank(),
+          legend.position = "top",
+          text = element_text(size = 8)) +
+    scale_y_continuous(labels = scales::percent_format(accuracy = 1L))
+
+ggsave("./papers/paper3/deliveries.png", device = "png", width = 90, height = 90, units = "mm", dpi = 1000)
+ggsave("./papers/paper3/deliveries.eps", device = cairo_ps, width = 90, height = 90, units = "mm", dpi = 1000)
+
+
+## delivery_gain <- function(sim_ndusl) {
+##     ## Gain of delivery as a funciton of the safety stock
+##     total_real_dels <- sum(sapply(sim_ndusl, function(x) length(x$real_dates)))
+##     total_opt_dels <- sum(sapply(sim_ndusl, function(x) length(x$dates)))
+
+##     gain <- total_real_dels - total_opt_dels
+
+##     return(gain)
+## }
+
+## gains <- sapply(list(simulated_ndusls_10,
+##          simulated_ndusls_12,
+##          simulated_ndusls_14,
+##          simulated_ndusls_16,
+##          simulated_ndusls_18,
+##          simulated_ndusls_20),
+##        delivery_gain)
+
+## png(filename="./papers/paper3/gain_opt.png")
+## plot(x = c(10, 12, 14, 16, 18, 20), y = gains)
+## dev.off()
+
+## Maybe we want to evaluate the smothness of total deliveries as a function of safety stock
+
+## Graph of the number and amount of deliveries over time
+## dates <- unlist(lapply(simulated_ndusls_10, function(x) x$dates))
+
+## table(dates)
+
+
+## The dates aren't the same for everyone
+
+## foo <- lapply(new_data, function(x) tail(x$data$con$orig, 365))

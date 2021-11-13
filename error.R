@@ -3,16 +3,29 @@
 #' author: Corey Ducharme / corey.ducharme@polymtl.ca
 
 #' packages
-library(smooth)
+library(greybox)
 
 #' imports
 
 #' functions
-my_MASE <- function(x, f) {
+my_MASE <- function(forecast, train, test, period = 1) {
     #' Mean Absolute Scaled Error
-    Q <- sum(abs(diff(x)), na.rm = TRUE) / (length(x) - 1)
-    res <- greybox::MASE(x, f, Q)
-    return(res)
+    ## forecast - forecasted values
+    ## train - data used for forecasting .. used to find scaling factor
+    ## test - actual data used for finding MASE.. same length as forecast
+    ## period - in case of seasonal data.. if not, use 1
+
+    forecast <- as.vector(forecast)
+    train <- as.vector(train)
+    test <- as.vector(test)
+
+    n <- length(train)
+    scalingFactor <- sum(abs(train[(period+1):n] - train[1:(n-period)])) / (n-period)
+
+    et <- abs(test-forecast)
+    qt <- et/scalingFactor
+    MASE <- mean(qt)
+    return(MASE)
 }
 
 
@@ -51,6 +64,21 @@ my_sPIS <- function(x, f, scale) {
 my_sAPIS <- function(x, f, scale) {
     #' scaled Absolute Period In Stock
     return(abs(my_PIS(x,f))/scale)
+}
+
+
+my_MAAPE <- function(x, f) {
+    #' Mean Arctangent Absolute Percentage Error
+    #' Kim, S., & Kim, H. (2016). A new metric of absolute percentage error for intermittent demand forecasts. International Journal of Forecasting, 32(3), 669-679.
+    return(mean(atan(abs((x - f)/x)), na.rm = TRUE))
+}
+
+
+my_mMAPE <- function(x, f) {
+    #'  Mean-based error measures for intermittent demand forecasting
+    #' Prestwich, S., Rossi, R., Armagan Tarim, S., Hnich, B., 2014. Mean-based error measures for intermittent demand forecasting. International Journal of Production Research 52, 6782-6791.
+    x_mean <- mean(x)
+    return(mean(abs((x_mean - f)/x_mean), na.rm = TRUE))
 }
 
 

@@ -69,3 +69,15 @@ save_cache <- function(data, id, cache)
     file <- cache_name(id, cache)
     saveRDS(data, file)
 }
+
+
+cross_apply <- function(l1, l2, FUN, ...) {
+    #' Apply a function over two list where every element is applied to function
+    #' crosswise
+    #' Example
+    #' l1 <- c(A, B)
+    #' l2 <- c(C, D)
+    #' will be evaluated
+    #' f(A,C), f(A,D), f(B,C), f(B,D)
+    return(sapply(l1, function(x) sapply(l2, function(y) FUN(x, y)), ...))
+ }

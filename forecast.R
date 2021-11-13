@@ -26,10 +26,8 @@ ets <- function(x, ...) {
     ## Do not allow the use of the lambda in the Box-Cox transformation since
     ## this forecasting will be used for intermittent data which are not
     ## normally distributed and thus the Box-Cox transformation is unsuited for it
-    model <- forecast::ets(as.ts(x), lambda = NULL, ...)
-    return(model)
+    return(forecast::ets(as.ts(x), lambda = NULL, ...))
 }
-
 
 
 forecast.ets <- function(obj, h, ...) {
@@ -113,9 +111,7 @@ update.ses <- function(obj, newdata) {
 
 compact_forecast.ses <- function(obj) {
     structure(
-        list(
-            NA
-        ),
+        NA,
         class = "sescompact"
     )
 }
@@ -170,6 +166,70 @@ update.Theta <- function(obj, newdata) {
 }
 
 
+ARIMA <- function(x, ...) {
+    #' ARIMA forecast
+    return(forecast::auto.arima(as.ts(x), ...))
+}
+
+
+forecast.ARIMA <- function(obj, h, ...) {
+    fcast <- forecast::forecast(object = obj, h = h, ...)
+    fcast$h <- h
+    return(fcast)
+}
+
+
+update.ARIMA <- function(model, newdata, ...) {
+    #' Needs to reupdate everything
+    #' Unfortunately there's no easy way to get the values of
+    #' p,d,q from an existing model
+    return(ARIMA(newdata))
+}
+
+
+compact_forecast.ARIMA <- function(obj) {
+    structure(
+        list(
+            NA
+        ),
+        class = "ARIMAcompact"
+    )
+
+}
+
+
+snaive <- function(x, ...) {
+    #' snaive forecast
+    fcast <- forecast::snaive(as.ts(x), ...)
+    fcast$series <- as.ts(x)
+
+    structure(
+        fcast,
+        class = "snaive"
+    )
+}
+
+
+forecast.snaive <- function(obj, h, ...) {
+    out <- forecast::snaive(y = obj$series, h = h)
+    out$h <- h
+    return(out)
+}
+
+
+update.snaive <- function(model, newdata, ...) {
+    return(snaive(newdata))
+}
+
+
+compact_forecast.snaive <- function(obj) {
+    structure(
+        NA,
+        class = "sescompact"
+    )
+}
+
+
 ## cum_ADIDA_forecast <- function(x, h, f.type = "ets") {
 ##     f.type <- match.arg(f.type, c("ets", "naive", "SBA.base", "SBA.opt"))
 
@@ -202,10 +262,8 @@ result_forecast.forecast <- function(fcast) {
 
 if (FALSE) {
 
-    client <- data_3[[2]]
-
-    x <- con_real_forecast_train_data(client, client$test$del_list[[1]])
-    y <- con_real_forecast_train_data(client, client$test$del_list[[2]])
+    x <- generate_xts(20)
+    y <- x
 
     foo <- theta(x)
     bar <- theta(y)
