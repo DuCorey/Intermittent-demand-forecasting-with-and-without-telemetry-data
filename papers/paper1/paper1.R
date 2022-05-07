@@ -1171,4 +1171,32 @@ clus_model_list <- list(clus_test_sba_opt$fcast,
 names(clus_model_list) <- c("SBA opt", "SBA base", "MAPA", "ets", "ADIDA weekly",
                           "ADIDA monthly", "ASACT weekly", "ASACT monthly")
 
-fcast_list_error_table(clus_model_list)
+
+## Graph
+mult_graph <- function(i) {
+    con <- con_del_data[[i]]$con$filt
+    raw_tel <- con_del_data[[i]]$cvd$tank[[1]]$telemetry.serie
+    del <- con_del_data[[i]]$del$filt
+
+    agg_tel <- apply.daily(xts(x=raw_tel$level, order.by = raw_tel$datetime), mean)
+    print(i)
+    tel <- xts(x=agg_tel, order.by = seq(from=as.Date(index(head(agg_tel,1)))-1, to=as.Date(index(tail(agg_tel, 1))), by="days"))
+    stock <- tel[xts_range("2015-07-01", "2017-01-31")]
+
+    merged = merge(demand=con, stock=stock, delivery=del)
+    names(merged) <- c("demand", "stock", "delivery")
+    plot.zoo(merged, plot.type = "multiple", xlab="Time", main="")
+}
+
+##70
+png(filename="./papers/paper1/example_series.png")
+mult_graph(70)
+dev.off()
+
+setEPS()
+postscript("./papers/paper1/example_series.eps")
+mult_graph(70)
+dev.off()
+
+mult_graph(70)
+ggsave("./papers/paper1/example_series.png", device = "png", width = 190, height = 190, units = "mm", dpi = 1000)
